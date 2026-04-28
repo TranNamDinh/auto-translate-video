@@ -70,7 +70,7 @@ namespace VideoProcessor
                 Padding = new Padding(14),
                 BackColor = Color.Transparent
             };
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 160)); // Input
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 190)); // Input
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 260)); // Options
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));  // Buttons
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // Log
