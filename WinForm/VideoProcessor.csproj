@@ -10,7 +10,7 @@
 		<RootNamespace>VideoProcessor</RootNamespace>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-		<Optimize>true</Optimize>
+		<Optimize>false</Optimize>
 	</PropertyGroup>
 
 </Project>

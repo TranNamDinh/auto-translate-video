@@ -1,18 +1,10 @@
 #!/usr/bin/env python3
-"""
-Video Processor - Transcribe, Translate, TTS
-Free, local processing using Whisper + Argos Translate + Edge-TTS
-"""
-
 import sys
 import os
 import json
 import asyncio
 import argparse
 import subprocess
-import tempfile
-import re
-from pathlib import Path
 
 # Fix Windows encoding
 if sys.platform == "win32":
@@ -20,35 +12,25 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+
 def log(msg, level="INFO"):
     print(f"[{level}] {msg}", flush=True)
 
 
 # ─────────────────────────────────────────────
-# 1. TRANSCRIBE (Whisper)
+# 1. TRANSCRIBE
 # ─────────────────────────────────────────────
-def transcribe_audio(audio_path: str, language: str = None) -> list[dict]:
-    """
-    Returns list of segments: [{start, end, text}, ...]
-    Uses openai-whisper (local, free).
-    """
+def transcribe_audio(audio_path, language=None):
     try:
         import whisper
     except ImportError:
-        log("Installing whisper...", "SETUP")
         subprocess.run([sys.executable, "-m", "pip", "install", "openai-whisper", "-q"], check=True)
         import whisper
 
-    log("Loading Whisper model (base)...")
     model = whisper.load_model("base")
-    
-    log(f"Transcribing: {audio_path}")
-    opts = {"word_timestamps": False}
-    if language:
-        opts["language"] = language
-    
-    result = model.transcribe(audio_path, **opts)
-    
+
+    result = model.transcribe(audio_path, language=language)
+
     segments = []
     for seg in result["segments"]:
         segments.append({
@@ -56,287 +38,282 @@ def transcribe_audio(audio_path: str, language: str = None) -> list[dict]:
             "end": seg["end"],
             "text": seg["text"].strip()
         })
-    
-    log(f"Transcribed {len(segments)} segments. Language: {result.get('language', 'unknown')}")
+
     return segments, result.get("language", "en")
 
 
 # ─────────────────────────────────────────────
-# 2. TRANSLATE (Argos Translate - free, local)
+# 2. TRANSLATE (FIXED)
 # ─────────────────────────────────────────────
-def translate_segments(segments: list[dict], src_lang: str, tgt_lang: str) -> list[dict]:
-    """
-    Translate text in segments using Argos Translate (fully local, free).
-    Falls back to returning original if same language.
-    """
-    if src_lang == tgt_lang:
-        log("Source and target language are the same, skipping translation.")
-        return segments
+def ensure_model(src, tgt):
+    import argostranslate.package
 
-    try:
-        import argostranslate.package
-        import argostranslate.translate
-    except ImportError:
-        log("Installing argos-translate...", "SETUP")
-        subprocess.run([sys.executable, "-m", "pip", "install", "argostranslate", "-q"], check=True)
-        import argostranslate.package
-        import argostranslate.translate
-
-    # Check if language pair installed
-    log(f"Setting up translation: {src_lang} -> {tgt_lang}")
     argostranslate.package.update_package_index()
     available = argostranslate.package.get_available_packages()
-    
-    pkg = next(
-        (p for p in available if p.from_code == src_lang and p.to_code == tgt_lang),
-        None
-    )
-    
-    if pkg is None:
-        # Try via English as pivot
-        log(f"Direct pair {src_lang}→{tgt_lang} not found, trying via English pivot...", "WARN")
-        # Just translate each segment
-        translated = []
-        for seg in segments:
-            translated.append({**seg, "text": seg["text"]})
-        return translated
-    
-    # Install if not already
-    installed = argostranslate.package.get_installed_packages()
-    installed_pairs = [(p.from_code, p.to_code) for p in installed]
-    
-    if (src_lang, tgt_lang) not in installed_pairs:
-        log(f"Downloading language pack {src_lang}→{tgt_lang}...")
-        argostranslate.package.install_from_path(pkg.download())
-    
-    log("Translating segments...")
-    translated = []
-    for seg in segments:
-        translated_text = argostranslate.translate.translate(seg["text"], src_lang, tgt_lang)
-        translated.append({**seg, "text": translated_text})
-    
-    log(f"Translated {len(translated)} segments.")
-    return translated
 
+    pkg = next((p for p in available if p.from_code == src and p.to_code == tgt), None)
 
-# ─────────────────────────────────────────────
-# 3. TEXT-TO-SPEECH (Edge-TTS - free Microsoft Azure voices)
-# ─────────────────────────────────────────────
-async def tts_segment_async(text: str, voice: str, output_path: str, rate: str = "+0%"):
-    """Generate TTS audio for a single segment."""
-    import edge_tts
-    communicate = edge_tts.Communicate(text, voice, rate=rate)
-    await communicate.save(output_path)
-
-
-def get_voice_for_language(lang: str) -> str:
-    """Return best Edge-TTS voice for language."""
-    voice_map = {
-        "vi": "vi-VN-NamMinhNeural",       # Vietnamese male
-        "en": "en-US-GuyNeural",            # English male
-        "zh": "zh-CN-YunxiNeural",          # Chinese
-        "ja": "ja-JP-KeitaNeural",          # Japanese
-        "ko": "ko-KR-InJoonNeural",         # Korean
-        "fr": "fr-FR-HenriNeural",          # French
-        "de": "de-DE-ConradNeural",         # German
-        "es": "es-ES-AlvaroNeural",         # Spanish
-        "ru": "ru-RU-DmitryNeural",         # Russian
-        "th": "th-TH-NiwatNeural",          # Thai
-        "id": "id-ID-ArdiNeural",           # Indonesian
-        "pt": "pt-BR-AntonioNeural",        # Portuguese
-    }
-    return voice_map.get(lang, "en-US-GuyNeural")
-
-
-def generate_tts_audio(segments: list[dict], tgt_lang: str, output_dir: str) -> list[dict]:
-    """
-    Generate TTS audio for each segment.
-    Returns segments with added 'audio_path' field.
-    """
-    try:
-        import edge_tts
-    except ImportError:
-        log("Installing edge-tts...", "SETUP")
-        subprocess.run([sys.executable, "-m", "pip", "install", "edge-tts", "-q"], check=True)
-        import edge_tts
-
-    voice = get_voice_for_language(tgt_lang)
-    log(f"Using TTS voice: {voice}")
-    
-    result_segments = []
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for i, seg in enumerate(segments):
-        if not seg["text"].strip():
-            result_segments.append({**seg, "audio_path": None})
-            continue
-        
-        audio_path = os.path.join(output_dir, f"seg_{i:04d}.mp3")
-        
-        try:
-            asyncio.run(tts_segment_async(seg["text"], voice, audio_path))
-            result_segments.append({**seg, "audio_path": audio_path})
-            log(f"TTS [{i+1}/{len(segments)}]: {seg['text'][:50]}...")
-        except Exception as e:
-            log(f"TTS failed for segment {i}: {e}", "WARN")
-            result_segments.append({**seg, "audio_path": None})
-    
-    return result_segments
-
-
-# ─────────────────────────────────────────────
-# 4. BUILD SRT SUBTITLE FILE
-# ─────────────────────────────────────────────
-def format_srt_time(seconds: float) -> str:
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds - int(seconds)) * 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def write_srt(segments: list[dict], srt_path: str):
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, seg in enumerate(segments, 1):
-            f.write(f"{i}\n")
-            f.write(f"{format_srt_time(seg['start'])} --> {format_srt_time(seg['end'])}\n")
-            f.write(f"{seg['text']}\n\n")
-    log(f"SRT written: {srt_path}")
-
-
-# ─────────────────────────────────────────────
-# 5. MERGE TTS AUDIO INTO TIMELINE
-# ─────────────────────────────────────────────
-def build_dubbed_audio(segments: list[dict], video_duration: float, output_path: str):
-    """
-    Merge TTS segments into a single audio track aligned to video timeline.
-    Uses FFmpeg with adelay filter.
-    """
-    log("Building dubbed audio track...")
-    
-    valid_segs = [(i, s) for i, s in enumerate(segments) if s.get("audio_path") and os.path.exists(s["audio_path"])]
-    
-    if not valid_segs:
-        log("No valid TTS segments found.", "WARN")
-        # Create silence
-        subprocess.run([
-            "ffmpeg", "-y", "-f", "lavfi",
-            f"-i", f"anullsrc=r=44100:cl=stereo",
-            "-t", str(video_duration),
-            output_path
-        ], check=True, capture_output=True)
+    if not pkg:
+        log(f"No model for {src}->{tgt}", "WARN")
         return
 
-    # Build complex filter
-    inputs = []
-    filter_parts = []
+    installed = argostranslate.package.get_installed_packages()
+    installed_pairs = [(p.from_code, p.to_code) for p in installed]
+
+    if (src, tgt) not in installed_pairs:
+        log(f"Installing model {src}->{tgt}")
+        argostranslate.package.install_from_path(pkg.download())
+
+def translate_segments(segments, src_lang, tgt_lang):
+    import argostranslate.translate
+
+    # normalize
+    if src_lang.lower().startswith("zh"):
+        src_lang = "zh"
+
+    log(f"Translate: {src_lang} -> {tgt_lang}")
+
+    # Chỉ tải mô hình dịch nếu ngôn ngữ đích khác ngôn ngữ nguồn
+    if src_lang != tgt_lang:
+        if src_lang != "en":
+            ensure_model(src_lang, "en")
+        if tgt_lang != "en":
+            ensure_model("en", tgt_lang)
+
+    translated = []
+
+    for seg in segments:
+        text = seg["text"].strip()
+
+        if not text:
+            translated.append({**seg, "text": ""})
+            continue
+
+        try:
+            # Xử lý thông minh các luồng dịch
+            if src_lang == tgt_lang:
+                final_text = text
+            elif src_lang == "en":
+                # Nguồn là tiếng Anh -> Dịch thẳng sang ngôn ngữ đích
+                final_text = argostranslate.translate.translate(text, "en", tgt_lang)
+            elif tgt_lang == "en":
+                # Đích là tiếng Anh -> Dịch thẳng từ ngôn ngữ nguồn
+                final_text = argostranslate.translate.translate(text, src_lang, "en")
+            else:
+                # Nguồn và đích đều không phải tiếng Anh -> Bắt cầu qua tiếng Anh
+                en_text = argostranslate.translate.translate(text, src_lang, "en")
+                final_text = argostranslate.translate.translate(en_text, "en", tgt_lang)
+
+            log(f"{text} -> {final_text}", "DEBUG")
+
+        except Exception as e:
+            log(f"❌ ERROR: {e}", "WARN")
+            final_text = text  # Fallback lại văn bản gốc nếu lỗi để không bị crash
+
+        translated.append({
+            **seg,
+            "text_src": text,
+            "text": final_text
+        })
+
+    return translated
+
+# ─────────────────────────────────────────────
+# 3. TTS
+# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# 3. TTS (ĐÃ TỐI ƯU HÓA)
+# ─────────────────────────────────────────────
+def get_voice_for_language(lang):
+    return {
+        "vi": "vi-VN-NamMinhNeural",       # Vietnamese male
+        "en": "en-US-GuyNeural",           # English male
+        "zh": "zh-CN-YunxiNeural",         # Chinese
+        "ja": "ja-JP-KeitaNeural",         # Japanese
+        "ko": "ko-KR-InJoonNeural",        # Korean
+        "fr": "fr-FR-HenriNeural",         # French
+        "de": "de-DE-ConradNeural",        # German
+        "es": "es-ES-AlvaroNeural",        # Spanish
+        "ru": "ru-RU-DmitryNeural",        # Russian
+        "th": "th-TH-NiwatNeural",         # Thai
+        "id": "id-ID-ArdiNeural",          # Indonesian
+        "pt": "pt-BR-AntonioNeural",       # Portuguese
+    }.get(lang, "en-US-GuyNeural")
+
+
+async def process_all_tts(segments, voice, output_dir):
+    import edge_tts
+    import re
+    import asyncio
+    import os
     
-    for idx, (seg_idx, seg) in enumerate(valid_segs):
-        inputs.extend(["-i", seg["audio_path"]])
-        delay_ms = int(seg["start"] * 1000)
-        filter_parts.append(f"[{idx}]adelay={delay_ms}|{delay_ms}[a{idx}]")
+    result = []
+
+    for i, seg in enumerate(segments):
+        text = seg["text"].strip()
+
+        # Lọc bỏ ký tự chết
+        text_clean = re.sub(r'[^\w\s]', '', text)
+        if not text_clean.strip():
+            result.append({**seg, "audio_path": None})
+            continue
+
+        path = os.path.join(output_dir, f"seg_{i:04d}.mp3")
+        
+        # === CƠ CHẾ TỰ ĐỘNG THỬ LẠI (AUTO-RETRY) ===
+        max_retries = 3
+        success = False
+        
+        for attempt in range(max_retries):
+            try:
+                # Lần 1 & 2 chạy rate +25%. Nếu vẫn lỗi, lần 3 trả về tốc độ gốc để tránh bị server bắt lỗi parameter.
+                current_rate = "+25%" if attempt < 2 else "+0%"
+                
+                communicate = edge_tts.Communicate(text, voice, rate=current_rate)
+                await communicate.save(path)
+                
+                # Kiểm tra chắc chắn file đã tải về và có dung lượng > 0
+                if os.path.exists(path) and os.path.getsize(path) > 0:
+                    result.append({**seg, "audio_path": path})
+                    success = True
+                    break  # Thành công thì thoát vòng lặp thử lại
+                else:
+                    raise Exception("File trống (No audio received)")
+                    
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Nếu lỗi, chờ 2 giây để server nhả block rồi mới thử lại
+                    await asyncio.sleep(2)
+                else:
+                    log(f"❌ Bó tay sau 3 lần thử ở đoạn [{text}]: {e}", "WARN")
+        
+        if not success:
+            result.append({**seg, "audio_path": None})
+            
+        # Nghỉ ngơi 0.3 giây giữa các câu bình thường để tránh spam server
+        await asyncio.sleep(0.3)
+
+    return result
+
+
+def generate_tts_audio(segments, tgt_lang, output_dir):
+    import asyncio
+    os.makedirs(output_dir, exist_ok=True)
+    voice = get_voice_for_language(tgt_lang)
     
-    # Mix all
-    mix_inputs = "".join(f"[a{i}]" for i in range(len(valid_segs)))
-    filter_parts.append(f"{mix_inputs}amix=inputs={len(valid_segs)}:normalize=0[out]")
-    
-    filter_complex = ";".join(filter_parts)
-    
-    cmd = ["ffmpeg", "-y"]
-    cmd.extend(inputs)
-    cmd.extend([
-        "-filter_complex", filter_complex,
-        "-map", "[out]",
-        "-t", str(video_duration),
-        "-ar", "44100",
-        "-ac", "2",
-        output_path
-    ])
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        log(f"FFmpeg error: {result.stderr}", "ERROR")
-        raise RuntimeError("Failed to build dubbed audio")
-    
-    log(f"Dubbed audio: {output_path}")
+    # Chạy 1 luồng duy nhất cho toàn bộ danh sách, tránh nghẽn mạng
+    return asyncio.run(process_all_tts(segments, voice, output_dir))
 
 
 # ─────────────────────────────────────────────
-# MAIN PIPELINE
+# 4. SRT
+# ─────────────────────────────────────────────
+def format_srt_time(s):
+    h = int(s // 3600)
+    m = int((s % 3600) // 60)
+    sec = int(s % 60)
+    ms = int((s - int(s)) * 1000)
+    return f"{h:02}:{m:02}:{sec:02},{ms:03}"
+
+
+def write_srt(segments, path):
+    with open(path, "w", encoding="utf-8") as f:
+        for i, seg in enumerate(segments, 1):
+            text = seg.get("text") or seg.get("text_src")
+
+            f.write(f"{i}\n")
+            f.write(f"{format_srt_time(seg['start'])} --> {format_srt_time(seg['end'])}\n")
+            f.write(f"{text}\n\n")
+
+
+# ─────────────────────────────────────────────
+# MAIN
 # ─────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description="Video Processor Pipeline")
-    parser.add_argument("--input", required=True, help="Input video path")
-    parser.add_argument("--audio-extract", help="Extract audio to this path")
-    parser.add_argument("--transcribe", action="store_true", help="Run transcription")
-    parser.add_argument("--translate", action="store_true", help="Run translation")
-    parser.add_argument("--src-lang", default=None, help="Source language code")
-    parser.add_argument("--tgt-lang", default="vi", help="Target language code")
-    parser.add_argument("--tts", action="store_true", help="Generate TTS audio")
-    parser.add_argument("--tts-dir", help="Directory for TTS audio files")
-    parser.add_argument("--dubbed-audio", help="Output dubbed audio path")
-    parser.add_argument("--srt-output", help="Output SRT path")
-    parser.add_argument("--segments-json", help="Path to save/load segments JSON")
-    parser.add_argument("--video-duration", type=float, default=0, help="Video duration in seconds")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True)
+    parser.add_argument("--audio-extract")
+    parser.add_argument("--transcribe", action="store_true")
+    parser.add_argument("--translate", action="store_true")
+    parser.add_argument("--src-lang", default=None)
+    parser.add_argument("--tgt-lang", default="vi")
+    parser.add_argument("--segments-json")
+    parser.add_argument("--srt-output")
     
+    # THÊM CÁC DÒNG NÀY ĐỂ NHẬN LỆNH TỪ C#
+    parser.add_argument("--tts", action="store_true")
+    parser.add_argument("--tts-dir")
+    parser.add_argument("--dubbed-audio")
+    parser.add_argument("--video-duration", type=float, default=0.0)
+
     args = parser.parse_args()
-    
+
     segments = []
-    detected_lang = args.src_lang or "en"
-    
-    # Load existing segments if available
+    lang = args.src_lang or "en"
+
     if args.segments_json and os.path.exists(args.segments_json):
         with open(args.segments_json, "r", encoding="utf-8") as f:
             data = json.load(f)
             segments = data.get("segments", [])
-            detected_lang = data.get("language", detected_lang)
-            log(f"Loaded {len(segments)} segments from {args.segments_json}")
-    
-    # Extract audio
+            lang = data.get("language", lang)
+
     if args.audio_extract:
-        log(f"Extracting audio from video...")
         subprocess.run([
             "ffmpeg", "-y", "-i", args.input,
             "-vn", "-acodec", "pcm_s16le",
             "-ar", "16000", "-ac", "1",
             args.audio_extract
-        ], check=True, capture_output=True)
-        log(f"Audio extracted: {args.audio_extract}")
-    
-    # Transcribe
-    if args.transcribe and args.audio_extract and os.path.exists(args.audio_extract):
-        segments, detected_lang = transcribe_audio(args.audio_extract, args.src_lang)
-        if args.segments_json:
-            with open(args.segments_json, "w", encoding="utf-8") as f:
-                json.dump({"segments": segments, "language": detected_lang}, f, ensure_ascii=False, indent=2)
-    
-    # Translate
-    if args.translate and segments:
-        src = detected_lang
-        tgt = args.tgt_lang
-        segments = translate_segments(segments, src, tgt)
-        if args.segments_json:
-            with open(args.segments_json, "w", encoding="utf-8") as f:
-                json.dump({"segments": segments, "language": detected_lang}, f, ensure_ascii=False, indent=2)
-    
-    # Write SRT
-    if args.srt_output and segments:
+        ], check=True)
+
+    if args.transcribe:
+        segments, lang = transcribe_audio(args.audio_extract, args.src_lang)
+
+    if args.translate:
+        segments = translate_segments(segments, lang, args.tgt_lang)
+
+    if args.segments_json:
+        with open(args.segments_json, "w", encoding="utf-8") as f:
+            json.dump({"segments": segments, "language": lang}, f, ensure_ascii=False, indent=2)
+
+    if args.srt_output:
         write_srt(segments, args.srt_output)
-    
-    # TTS
-    if args.tts and segments and args.tts_dir:
+        
+        # ... (code ghi srt_output ở trên) ...
+
+    # XỬ LÝ LỒNG TIẾNG (TTS)
+    if args.tts and args.tts_dir and args.dubbed_audio:
+        log("Bắt đầu tạo TTS và ghép nối audio...")
+        try:
+            from pydub import AudioSegment
+        except ImportError:
+            subprocess.run([sys.executable, "-m", "pip", "install", "pydub", "-q"], check=True)
+            from pydub import AudioSegment
+
+        # 1. Tạo các file audio nhỏ cho từng segment
         segments = generate_tts_audio(segments, args.tgt_lang, args.tts_dir)
-        if args.segments_json:
-            with open(args.segments_json, "w", encoding="utf-8") as f:
-                json.dump({"segments": segments, "language": detected_lang}, f, ensure_ascii=False, indent=2)
-    
-    # Build dubbed audio
-    if args.dubbed_audio and segments and args.video_duration > 0:
-        build_dubbed_audio(segments, args.video_duration, args.dubbed_audio)
-    
-    log("Pipeline step completed.")
-    return 0
+
+        # 2. Tạo một track im lặng (silent) bằng tổng thời lượng video
+        base_audio = AudioSegment.silent(duration=int(args.video_duration * 1000))
+
+        # 3. Đặt các câu thoại TTS vào đúng vị trí thời gian
+        for seg in segments:
+            audio_path = seg.get("audio_path")
+            if audio_path and os.path.exists(audio_path):
+                try:
+                    seg_audio = AudioSegment.from_file(audio_path)
+                    start_ms = int(seg["start"] * 1000)
+                    base_audio = base_audio.overlay(seg_audio, position=start_ms)
+                except Exception as e:
+                    log(f"Lỗi ghép đoạn TTS: {e}", "WARN")
+
+        # 4. Xuất file audio tổng (.aac hoặc .wav tùy vào cấu hình C#)
+        export_format = "adts" if args.dubbed_audio.endswith(".aac") else "wav"
+        base_audio.export(args.dubbed_audio, format=export_format)
+        log(f"Đã xuất audio lồng tiếng: {args.dubbed_audio}")
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

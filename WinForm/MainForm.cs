@@ -190,28 +190,79 @@ namespace VideoProcessor
             mainLayout.Controls.Add(grpLog, 0, 3);
         }
 
+        //private Panel MakeLangRow()
+        //{
+        //    var panel = new Panel { Padding = new Padding(0, 4, 0, 0) };
+        //    string[] langs = { "auto", "vi", "en", "zh", "ja", "ko", "fr", "de", "es", "ru", "th", "id", "pt" };
+
+        //    var lblSrc = new Label { Text = "Ngôn ngữ gốc:", ForeColor = Color.FromArgb(170, 170, 200), AutoSize = true, Location = new Point(0, 8) };
+        //    cboSrcLang.Items.AddRange(langs);
+        //    cboSrcLang.SelectedItem = "auto";
+        //    cboSrcLang.BackColor = Color.FromArgb(35, 35, 48);
+        //    cboSrcLang.ForeColor = Color.White;
+        //    cboSrcLang.FlatStyle = FlatStyle.Flat;
+        //    cboSrcLang.Width = 80; cboSrcLang.Location = new Point(120, 5);
+        //    cboSrcLang.DropDownStyle = ComboBoxStyle.DropDownList;
+
+        //    var lblTgt = new Label { Text = "Dịch sang:", ForeColor = Color.FromArgb(170, 170, 200), AutoSize = true, Location = new Point(210, 8) };
+        //    cboTgtLang.Items.AddRange(langs);
+        //    cboTgtLang.SelectedItem = "vi";
+        //    cboTgtLang.BackColor = Color.FromArgb(35, 35, 48);
+        //    cboTgtLang.ForeColor = Color.White;
+        //    cboTgtLang.FlatStyle = FlatStyle.Flat;
+        //    cboTgtLang.Width = 80; cboTgtLang.Location = new Point(295, 5);
+        //    cboTgtLang.DropDownStyle = ComboBoxStyle.DropDownList;
+
+        //    panel.Controls.AddRange(new Control[] { lblSrc, cboSrcLang, lblTgt, cboTgtLang });
+        //    return panel;
+        //}
+
         private Panel MakeLangRow()
         {
-            var panel = new Panel { Padding = new Padding(0, 4, 0, 0) };
+            // Dùng FlowLayoutPanel để tự động căn dòng, chống lỗi đè giao diện khi Scale màn hình
+            var panel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Padding = new Padding(0, 4, 0, 0),
+                AutoSize = true // Tự động co giãn theo nội dung
+            };
+
             string[] langs = { "auto", "vi", "en", "zh", "ja", "ko", "fr", "de", "es", "ru", "th", "id", "pt" };
 
-            var lblSrc = new Label { Text = "Ngôn ngữ gốc:", ForeColor = Color.FromArgb(170, 170, 200), AutoSize = true, Location = new Point(0, 8) };
+            var lblSrc = new Label
+            {
+                Text = "Ngôn ngữ gốc:",
+                ForeColor = Color.FromArgb(170, 170, 200),
+                AutoSize = true,
+                Margin = new Padding(0, 8, 5, 0) // Căn lề trái/phải để không dính sát vào ô chọn
+            };
+
             cboSrcLang.Items.AddRange(langs);
             cboSrcLang.SelectedItem = "auto";
             cboSrcLang.BackColor = Color.FromArgb(35, 35, 48);
             cboSrcLang.ForeColor = Color.White;
             cboSrcLang.FlatStyle = FlatStyle.Flat;
-            cboSrcLang.Width = 80; cboSrcLang.Location = new Point(120, 5);
+            cboSrcLang.Width = 75;
             cboSrcLang.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboSrcLang.Margin = new Padding(0, 5, 15, 0); // Đẩy nút Dịch sang cách xa 15px
 
-            var lblTgt = new Label { Text = "Dịch sang:", ForeColor = Color.FromArgb(170, 170, 200), AutoSize = true, Location = new Point(210, 8) };
+            var lblTgt = new Label
+            {
+                Text = "Dịch sang:",
+                ForeColor = Color.FromArgb(170, 170, 200),
+                AutoSize = true,
+                Margin = new Padding(0, 8, 5, 0)
+            };
+
             cboTgtLang.Items.AddRange(langs);
             cboTgtLang.SelectedItem = "vi";
             cboTgtLang.BackColor = Color.FromArgb(35, 35, 48);
             cboTgtLang.ForeColor = Color.White;
             cboTgtLang.FlatStyle = FlatStyle.Flat;
-            cboTgtLang.Width = 80; cboTgtLang.Location = new Point(295, 5);
+            cboTgtLang.Width = 75;
             cboTgtLang.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboTgtLang.Margin = new Padding(0, 5, 0, 0);
 
             panel.Controls.AddRange(new Control[] { lblSrc, cboSrcLang, lblTgt, cboTgtLang });
             return panel;
@@ -557,28 +608,6 @@ namespace VideoProcessor
                     Process.Start("explorer.exe", $"/select,\"{outputPath}\"");
             }
 
-            //// Copy output ve dung ten goc
-            //if (File.Exists(safeOutput))
-            //{
-            //    File.Copy(safeOutput, outputPath, true);
-            //    Log($"✓ Saved: {outputPath}", LogLevel.Success);
-            //}
-            //else
-            //{
-            //    throw new Exception($"FFmpeg did not produce output file.");
-            //}
-
-            //Log($"✅ Output: {safeOutput}", LogLevel.Success);
-
-            //// Open folder
-            //if (File.Exists(safeOutput))
-            //{
-            //    var result = MessageBox.Show($"Xử lý xong!\n\nOutput: {safeOutput}\n\nMở thư mục chứa file?",
-            //        "Hoàn tất", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-            //    if (result == DialogResult.Yes)
-            //        Process.Start("explorer.exe", $"/select,\"{safeOutput}\"");
-            //}
-
             // Cleanup
             try { Directory.Delete(_workDir, true); } catch { }
         }
@@ -596,7 +625,10 @@ namespace VideoProcessor
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardError = true,
+                // THÊM 2 DÒNG NÀY VÀO:
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8
             };
 
             var output = new System.Text.StringBuilder();
@@ -659,124 +691,6 @@ namespace VideoProcessor
             await RunProcessAsync("ffmpeg", $"-y -i \"{videoPath}\" -vn -acodec pcm_s16le -ar 16000 -ac 1 \"{audioPath}\"", ct);
         }
 
-        //private async Task RenderFinalVideoAsync(string inputPath, string srtPath, string dubbedAudioPath, string outputPath, VideoInfo info, CancellationToken ct)
-        //{
-        //    var speed = (double)nudSpeed.Value;
-        //    var zoom = (double)nudZoom.Value / 100.0;
-        //    var volumeDb = (double)nudVolumeDuck.Value;
-
-        //    // Build video filter chain
-        //    var vfParts = new List<string>();
-
-        //    // Zoom (crop center, scale up)
-        //    //if (chkZoom.Checked)
-        //    //{
-        //    //    int cropW = (int)(info.Width / zoom);
-        //    //    int cropH = (int)(info.Height / zoom);
-        //    //    int x = (info.Width - cropW) / 2;
-        //    //    int y = (info.Height - cropH) / 2;
-        //    //    vfParts.Add($"crop={cropW}:{cropH}:{x}:{y},scale={info.Width}:{info.Height}");
-        //    //}
-        //    if (chkZoom.Checked)
-        //    {
-        //        double zoomFactor = (double)nudZoom.Value / 100.0;
-
-        //        // Scale up toàn bộ frame
-        //        int scaledW = (int)Math.Round(info.Width * zoomFactor);
-        //        int scaledH = (int)Math.Round(info.Height * zoomFactor);
-
-        //        // Đảm bảo chia hết cho 2 (H.264 yêu cầu)
-        //        if (scaledW % 2 != 0) scaledW++;
-        //        if (scaledH % 2 != 0) scaledH++;
-
-        //        // Crop chính xác từ center về kích thước gốc
-        //        int cropX = (scaledW - info.Width) / 2;
-        //        int cropY = (scaledH - info.Height) / 2;
-
-        //        // Đảm bảo cropX/Y không lẻ
-        //        if (cropX % 2 != 0) cropX--;
-        //        if (cropY % 2 != 0) cropY--;
-
-        //        vfParts.Add($"scale={scaledW}:{scaledH},crop={info.Width}:{info.Height}:{cropX}:{cropY}");
-        //    }
-
-        //    // Speed
-        //    if (chkSpeed.Checked && speed != 1.0)
-        //        vfParts.Add($"setpts={(1.0 / speed).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}*PTS");
-
-        //    // Subtitles - black box, white text, centered bottom
-        //    //if (chkSub.Checked && File.Exists(srtPath))
-        //    //{
-        //    //    var escapedSrt = srtPath.Replace("\\", "/").Replace(":", "\\:");
-        //    //    // Force style: white text, black background box, centered bottom
-        //    //    var subStyle = "FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=30";
-        //    //    vfParts.Add($"subtitles='{escapedSrt}':force_style='{subStyle}'");
-        //    //}
-
-        //    //if (chkSub.Checked && File.Exists(srtPath))
-        //    //{
-        //    //    // Windows path fix: FFmpeg can't handle backslash + colon
-        //    //    // Copy SRT to temp path without colon (avoid drive letter issue)
-        //    //    var safeSrt = Path.Combine(Path.GetTempPath(), "vp_sub.srt");
-        //    //    File.Copy(srtPath, safeSrt, true);
-        //    //    var escapedSrt = safeSrt.Replace("\\", "/");
-
-        //    //    var subStyle = "FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=30";
-        //    //    vfParts.Add($"subtitles='{escapedSrt}':force_style='{subStyle}'");
-        //    //}
-
-        //    if (chkSub.Checked && File.Exists(srtPath))
-        //    {
-        //        var safeSrt = Path.Combine(Path.GetTempPath(), "vp_sub.srt");
-        //        File.Copy(srtPath, safeSrt, true);
-
-        //        // Dung forward slash, khong co ky tu dac biet
-        //        var escapedSrt = safeSrt.Replace("\\", "/");
-
-        //        var subStyle = "FontName=Arial,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=40";
-
-        //        // Them charenc=UTF-8 de tranh loi encoding
-        //        vfParts.Add($"subtitles='{escapedSrt}':charenc=UTF-8:force_style='{subStyle}'");
-        //    }
-
-        //    string vf = vfParts.Count > 0 ? string.Join(",", vfParts) : "null";
-
-        //    // Audio filter chain
-        //    var afParts = new List<string>();
-        //    afParts.Add($"volume={volumeDb}dB"); // Giảm âm gốc
-        //    if (chkSpeed.Checked && speed != 1.0)
-        //        afParts.Add($"atempo={speed.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}");
-        //    string originalAf = string.Join(",", afParts);
-
-        //    // Build FFmpeg command
-        //    var cmd = new System.Text.StringBuilder();
-        //    cmd.Append($"-y -i \"{inputPath}\" ");
-
-        //    bool hasDub = chkDub.Checked && File.Exists(dubbedAudioPath);
-        //    if (hasDub)
-        //        cmd.Append($"-i \"{dubbedAudioPath}\" ");
-
-        //    cmd.Append($"-vf \"{vf}\" ");
-
-        //    if (hasDub)
-        //    {
-        //        // Mix original (ducked) + dubbed
-        //        cmd.Append($"-filter_complex \"[0:a]{originalAf}[orig];[orig][1:a]amix=inputs=2:normalize=0[aout]\" ");
-        //        cmd.Append($"-map 0:v -map \"[aout]\" ");
-        //    }
-        //    else
-        //    {
-        //        cmd.Append($"-af \"{originalAf}\" ");
-        //    }
-
-        //    // Quality settings - CRF 18 = near lossless
-        //    cmd.Append("-c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k ");
-        //    cmd.Append($"-movflags +faststart \"{outputPath}\"");
-
-        //    Log($"FFmpeg args: {cmd}", LogLevel.Debug);
-        //    await RunProcessAsync("ffmpeg", cmd.ToString(), ct);
-        //}
-
         private async Task RenderFinalVideoAsync(string inputPath, string srtPath, string dubbedAudioPath, string outputPath, VideoInfo info, CancellationToken ct)
         {
             var speed = (double)nudSpeed.Value;
@@ -785,58 +699,71 @@ namespace VideoProcessor
 
             var vfParts = new List<string>();
 
-            // Zoom
+            // 1. CROP & ZOOM (Làm đầu tiên)
             if (chkZoom.Checked)
             {
-                int scaledW = (int)Math.Round(info.Width * zoom);
-                int scaledH = (int)Math.Round(info.Height * zoom);
-                if (scaledW % 2 != 0) scaledW++;
-                if (scaledH % 2 != 0) scaledH++;
-                int cropX = (scaledW - info.Width) / 2;
-                int cropY = (scaledH - info.Height) / 2;
+                int cropW = (int)Math.Round(info.Width / zoom);
+                int cropH = (int)Math.Round(info.Height / zoom);
+                if (cropW % 2 != 0) cropW--;
+                if (cropH % 2 != 0) cropH--;
+                int cropX = (info.Width - cropW) / 2;
+                int cropY = (info.Height - cropH) / 2;
                 if (cropX % 2 != 0) cropX--;
                 if (cropY % 2 != 0) cropY--;
-                vfParts.Add($"scale={scaledW}:{scaledH},crop={info.Width}:{info.Height}:{cropX}:{cropY}");
+                vfParts.Add($"crop={cropW}:{cropH}:{cropX}:{cropY},scale={info.Width}:{info.Height}");
             }
 
-            // Speed
-            if (chkSpeed.Checked && speed != 1.0)
-                vfParts.Add($"setpts={(1.0 / speed).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}*PTS");
-
-            // Subtitle - dung ASS thay vi SRT de tranh loi force_style
+            // 2. ÉP SUB VÀO VIDEO (Làm khi video chưa bị tua nhanh)
             if (chkSub.Checked && File.Exists(srtPath))
             {
-                // Convert SRT -> ASS voi style tuy chinh
                 var assPath = Path.Combine(Path.GetTempPath(), "vp_sub.ass");
                 ConvertSrtToAss(srtPath, assPath);
-                var escapedAss = assPath.Replace("\\", "/");
-                vfParts.Add($"ass='{escapedAss}'");
+                var escapedAss = assPath.Replace("\\", "/").Replace(":", "\\:");
+                vfParts.Add($"ass=filename='{escapedAss}'");
+            }
+
+            // 3. TUA NHANH VIDEO (Làm cuối cùng cho phần hình)
+            if (chkSpeed.Checked && speed != 1.0)
+            {
+                vfParts.Add($"setpts={(1.0 / speed).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}*PTS");
             }
 
             string vf = vfParts.Count > 0 ? string.Join(",", vfParts) : "null";
 
-            // Audio
-            var afParts = new List<string>();
-            afParts.Add($"volume={volumeDb.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}dB");
-            if (chkSpeed.Checked && speed != 1.0)
-                afParts.Add($"atempo={speed.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}");
-            string originalAf = string.Join(",", afParts);
+            // 4. XỬ LÝ ÂM THANH
+            double linearVol = Math.Pow(10, volumeDb / 20.0);
+            string volFilter = $"volume={linearVol.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}";
+            string speedFilter = (chkSpeed.Checked && speed != 1.0) ? $"atempo={speed.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}" : "";
 
             bool hasDub = chkDub.Checked && File.Exists(dubbedAudioPath);
 
             var cmd = new System.Text.StringBuilder();
             cmd.Append($"-y -i \"{inputPath}\" ");
             if (hasDub) cmd.Append($"-i \"{dubbedAudioPath}\" ");
-            cmd.Append($"-vf \"{vf}\" ");
+
+            string videoFilter = vf != "null" ? $"[0:v]{vf}[vout]; " : "";
+            string mapV = vf != "null" ? "\"[vout]\"" : "0:v";
 
             if (hasDub)
             {
-                cmd.Append($"-filter_complex \"[0:a]{originalAf}[orig];[orig][1:a]amix=inputs=2:normalize=0[aout]\" ");
-                cmd.Append($"-map 0:v -map \"[aout]\" ");
+                // Trộn TTS vào âm thanh gốc TRƯỚC, rồi mới tua nhanh toàn bộ (atempo)
+                string atempoPart = !string.IsNullOrEmpty(speedFilter) ? $",{speedFilter}" : "";
+                cmd.Append($"-filter_complex \"{videoFilter}[0:a]{volFilter}[orig];[orig][1:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0{atempoPart}[aout]\" ");
+                cmd.Append($"-map {mapV} -map \"[aout]\" ");
             }
             else
             {
-                cmd.Append($"-af \"{originalAf}\" ");
+                string af = volFilter;
+                if (!string.IsNullOrEmpty(speedFilter)) af += $",{speedFilter}";
+
+                if (vf != "null")
+                {
+                    cmd.Append($"-filter_complex \"{videoFilter}\" -map \"[vout]\" -map 0:a -af \"{af}\" ");
+                }
+                else
+                {
+                    cmd.Append($"-map 0:v -map 0:a -af \"{af}\" ");
+                }
             }
 
             cmd.Append($"-c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k -movflags +faststart \"{outputPath}\"");
@@ -844,6 +771,88 @@ namespace VideoProcessor
             Log($"FFmpeg args: {cmd}", LogLevel.Debug);
             await RunProcessAsync("ffmpeg", cmd.ToString(), ct);
         }
+
+        //    private async Task RenderFinalVideoAsync(string inputPath, string srtPath, string dubbedAudioPath, string outputPath, VideoInfo info, CancellationToken ct)
+        //    {
+        //        var speed = (double)nudSpeed.Value;
+        //        var zoom = (double)nudZoom.Value / 100.0;
+        //        var volumeDb = (double)nudVolumeDuck.Value;
+
+        //        var vfParts = new List<string>();
+
+        //        if (chkZoom.Checked)
+        //        {
+        //            // CapCut Scale 130% (zoom = 1.3) nghĩa là khung hình thực tế chỉ lấy 1/1.3 (~76.92%) diện tích ở giữa.
+
+        //            // 1. Tính toán kích thước vùng trung tâm cần giữ lại
+        //            int cropW = (int)Math.Round(info.Width / zoom);
+        //            int cropH = (int)Math.Round(info.Height / zoom);
+
+        //            // H.264 yêu cầu kích thước phải là số chẵn
+        //            if (cropW % 2 != 0) cropW--;
+        //            if (cropH % 2 != 0) cropH--;
+
+        //            // 2. Tính toán tọa độ x, y để cắt đúng từ tâm
+        //            int cropX = (info.Width - cropW) / 2;
+        //            int cropY = (info.Height - cropH) / 2;
+
+        //            // Đảm bảo tọa độ cắt cũng là số chẵn
+        //            if (cropX % 2 != 0) cropX--;
+        //            if (cropY % 2 != 0) cropY--;
+
+        //            // 3. Lệnh FFmpeg: Crop trước, Scale sau
+        //            vfParts.Add($"crop={cropW}:{cropH}:{cropX}:{cropY},scale={info.Width}:{info.Height}");
+        //        }
+
+        //        // Speed
+        //        if (chkSpeed.Checked && speed != 1.0)
+        //            vfParts.Add($"setpts={(1.0 / speed).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}*PTS");
+
+        //        // Subtitle - dung ASS thay vi SRT de tranh loi force_style
+        //        if (chkSub.Checked && File.Exists(srtPath))
+        //        {
+        //            // Convert SRT -> ASS voi style tuy chinh
+        //            var assPath = Path.Combine(Path.GetTempPath(), "vp_sub.ass");
+        //            ConvertSrtToAss(srtPath, assPath);
+
+        //            //var escapedAss = assPath.Replace("\\", "/");
+        //            var escapedAss = assPath
+        //.Replace("\\", "/")
+        //.Replace(":", "\\:");
+        //            vfParts.Add($"ass=filename='{escapedAss}'");
+        //        }
+
+        //        string vf = vfParts.Count > 0 ? string.Join(",", vfParts) : "null";
+
+        //        // Audio
+        //        var afParts = new List<string>();
+        //        afParts.Add($"volume={volumeDb.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}dB");
+        //        if (chkSpeed.Checked && speed != 1.0)
+        //            afParts.Add($"atempo={speed.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}");
+        //        string originalAf = string.Join(",", afParts);
+
+        //        bool hasDub = chkDub.Checked && File.Exists(dubbedAudioPath);
+
+        //        var cmd = new System.Text.StringBuilder();
+        //        cmd.Append($"-y -i \"{inputPath}\" ");
+        //        if (hasDub) cmd.Append($"-i \"{dubbedAudioPath}\" ");
+        //        cmd.Append($"-vf \"{vf}\" ");
+
+        //        if (hasDub)
+        //        {
+        //            cmd.Append($"-filter_complex \"[0:a]{originalAf}[orig];[orig][1:a]amix=inputs=2:normalize=0[aout]\" ");
+        //            cmd.Append($"-map 0:v -map \"[aout]\" ");
+        //        }
+        //        else
+        //        {
+        //            cmd.Append($"-af \"{originalAf}\" ");
+        //        }
+
+        //        cmd.Append($"-c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k -movflags +faststart \"{outputPath}\"");
+
+        //        Log($"FFmpeg args: {cmd}", LogLevel.Debug);
+        //        await RunProcessAsync("ffmpeg", cmd.ToString(), ct);
+        //    }
 
         private void ConvertSrtToAss(string srtPath, string assPath)
         {
@@ -856,7 +865,7 @@ Collisions: Normal
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,1,0,2,10,10,40,1
+Style: Default,Arial,45,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,1,0,2,10,10,40,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
