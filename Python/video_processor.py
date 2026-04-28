@@ -18,28 +18,38 @@ def log(msg, level="INFO"):
 
 
 # ─────────────────────────────────────────────
-# 1. TRANSCRIBE
+# 1. TRANSCRIBE (TỐI ƯU HÓA BẰNG GPU CUDA & AUTO-INSTALL)
 # ─────────────────────────────────────────────
 def transcribe_audio(audio_path, language=None):
     try:
-        import whisper
+        from faster_whisper import WhisperModel
     except ImportError:
-        subprocess.run([sys.executable, "-m", "pip", "install", "openai-whisper", "-q"], check=True)
-        import whisper
+        log("Đang tự động cài đặt faster-whisper (chỉ chạy lần đầu)...", "INFO")
+        subprocess.run([sys.executable, "-m", "pip", "install", "faster-whisper", "-q"], check=True)
+        from faster_whisper import WhisperModel
 
-    model = whisper.load_model("base")
-
-    result = model.transcribe(audio_path, language=language)
-
+    log("🚀 Đang nạp Faster-Whisper lên VRAM GPU...")
+    
+    # Khởi tạo model trên GPU. float16 giúp tăng gấp đôi tốc độ và tiết kiệm VRAM.
+    try:
+        model = WhisperModel("base", device="cuda", compute_type="float16")
+    except Exception as e:
+        log(f"⚠️ Không tìm thấy GPU hoặc thiếu CUDA, chuyển sang chạy bằng CPU: {e}", "WARN")
+        model = WhisperModel("base", device="cpu", compute_type="int8")
+        
+    log("Bắt đầu bóc băng audio...")
+    segments_gen, info = model.transcribe(audio_path, language=language)
+    
     segments = []
-    for seg in result["segments"]:
+    for seg in segments_gen:
         segments.append({
-            "start": seg["start"],
-            "end": seg["end"],
-            "text": seg["text"].strip()
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text.strip()
         })
+        log(f"[{seg.start:.2f}s -> {seg.end:.2f}s] {seg.text.strip()}", "DEBUG")
 
-    return segments, result.get("language", "en")
+    return segments, info.language
 
 
 # ─────────────────────────────────────────────
@@ -117,92 +127,83 @@ def translate_segments(segments, src_lang, tgt_lang):
         })
 
     return translated
+# ─────────────────────────────────────────────
+# 3. TTS (LOCAL BẰNG PIPER TTS - OFFLINE 100%)
+# ─────────────────────────────────────────────
+def get_piper_model_url(lang):
+    # Danh sách các model Piper chất lượng cao tải từ HuggingFace
+    models = {
+        # Tiếng Việt
+        "vi": ("vi_VN-vivos-x_low.onnx", "https://huggingface.co/rhasspy/piper-voices/resolve/main/vi/vi_VN/vivos/x_low/vi_VN-vivos-x_low.onnx"),
+        
+        # Tiếng Anh (Mỹ) - Giọng nữ Amy (Medium) cực kỳ tự nhiên và rõ chữ, chuẩn giọng review/kể chuyện
+        "en": ("en_US-amy-medium.onnx", "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx"),
+        
+        # Tiếng Hàn (Hàn Quốc) - Giọng nữ KSS chuẩn Seoul, rất phù hợp cho video fitness hoặc vlog
+        "ko": ("ko_KR-kss-medium.onnx", "https://huggingface.co/rhasspy/piper-voices/resolve/main/ko/ko_KR/kss/medium/ko_KR-kss-medium.onnx")
+    }
+    return models.get(lang, models["vi"]) # Mặc định lấy tiếng Việt nếu dropdown gửi ngôn ngữ lạ
 
-# ─────────────────────────────────────────────
-# 3. TTS
-# ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# 3. TTS (ĐÃ TỐI ƯU HÓA)
-# ─────────────────────────────────────────────
-def get_voice_for_language(lang):
-    return {
-        "vi": "vi-VN-NamMinhNeural",       # Vietnamese male
-        "en": "en-US-GuyNeural",           # English male
-        "zh": "zh-CN-YunxiNeural",         # Chinese
-        "ja": "ja-JP-KeitaNeural",         # Japanese
-        "ko": "ko-KR-InJoonNeural",        # Korean
-        "fr": "fr-FR-HenriNeural",         # French
-        "de": "de-DE-ConradNeural",        # German
-        "es": "es-ES-AlvaroNeural",        # Spanish
-        "ru": "ru-RU-DmitryNeural",        # Russian
-        "th": "th-TH-NiwatNeural",         # Thai
-        "id": "id-ID-ArdiNeural",          # Indonesian
-        "pt": "pt-BR-AntonioNeural",       # Portuguese
-    }.get(lang, "en-US-GuyNeural")
+def ensure_piper_model(model_name, url):
+    import urllib.request
+    
+    # Hàm này tự động tải file Model và file JSON cấu hình nếu máy chưa có
+    if not os.path.exists(model_name):
+        log(f"Đang tải model giọng đọc ({model_name})...", "INFO")
+        urllib.request.urlretrieve(url, model_name)
+    
+    json_name = f"{model_name}.json"
+    if not os.path.exists(json_name):
+        json_url = f"{url}.json"
+        urllib.request.urlretrieve(json_url, json_name)
 
-
-async def process_all_tts(segments, voice, output_dir):
-    import edge_tts
+def generate_tts_audio(segments, tgt_lang, output_dir):
     import re
-    import asyncio
-    import os
+    import wave
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 1. Tự động cài đặt thư viện Piper TTS nếu chưa có
+    try:
+        from piper.voice import PiperVoice
+    except ImportError:
+        log("Đang tự động cài đặt piper-tts (chỉ chạy lần đầu)...", "INFO")
+        subprocess.run([sys.executable, "-m", "pip", "install", "piper-tts", "-q"], check=True)
+        from piper.voice import PiperVoice
+
+    # 2. Kiểm tra và tải model về máy
+    model_name, model_url = get_piper_model_url(tgt_lang)
+    ensure_piper_model(model_name, model_url)
+    
+    # 3. Nạp model vào bộ nhớ để chuẩn bị đọc
+    log(f"Đang nạp model Piper TTS ({model_name}) vào RAM...", "INFO")
+    voice = PiperVoice.load(model_name)
     
     result = []
-
+    log("Bắt đầu sinh âm thanh lồng tiếng (Offline)...")
+    
     for i, seg in enumerate(segments):
         text = seg["text"].strip()
-
-        # Lọc bỏ ký tự chết
+        
+        # Xóa ký tự đặc biệt để tránh lỗi bộ đọc
         text_clean = re.sub(r'[^\w\s]', '', text)
         if not text_clean.strip():
             result.append({**seg, "audio_path": None})
             continue
 
-        path = os.path.join(output_dir, f"seg_{i:04d}.mp3")
+        # CHÚ Ý: Piper sinh ra file .wav (chất lượng cao) thay vì .mp3
+        path = os.path.join(output_dir, f"seg_{i:04d}.wav")
         
-        # === CƠ CHẾ TỰ ĐỘNG THỬ LẠI (AUTO-RETRY) ===
-        max_retries = 3
-        success = False
-        
-        for attempt in range(max_retries):
-            try:
-                # Lần 1 & 2 chạy rate +25%. Nếu vẫn lỗi, lần 3 trả về tốc độ gốc để tránh bị server bắt lỗi parameter.
-                current_rate = "+25%" if attempt < 2 else "+0%"
-                
-                communicate = edge_tts.Communicate(text, voice, rate=current_rate)
-                await communicate.save(path)
-                
-                # Kiểm tra chắc chắn file đã tải về và có dung lượng > 0
-                if os.path.exists(path) and os.path.getsize(path) > 0:
-                    result.append({**seg, "audio_path": path})
-                    success = True
-                    break  # Thành công thì thoát vòng lặp thử lại
-                else:
-                    raise Exception("File trống (No audio received)")
-                    
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    # Nếu lỗi, chờ 2 giây để server nhả block rồi mới thử lại
-                    await asyncio.sleep(2)
-                else:
-                    log(f"❌ Bó tay sau 3 lần thử ở đoạn [{text}]: {e}", "WARN")
-        
-        if not success:
+        try:
+            # Render ra file audio ngay lập tức
+            with wave.open(path, "wb") as wav_file:
+                voice.synthesize(text, wav_file)
+            result.append({**seg, "audio_path": path})
+            
+        except Exception as e:
+            log(f"❌ Lỗi TTS [{text}]: {e}", "WARN")
             result.append({**seg, "audio_path": None})
             
-        # Nghỉ ngơi 0.3 giây giữa các câu bình thường để tránh spam server
-        await asyncio.sleep(0.3)
-
     return result
-
-
-def generate_tts_audio(segments, tgt_lang, output_dir):
-    import asyncio
-    os.makedirs(output_dir, exist_ok=True)
-    voice = get_voice_for_language(tgt_lang)
-    
-    # Chạy 1 luồng duy nhất cho toàn bộ danh sách, tránh nghẽn mạng
-    return asyncio.run(process_all_tts(segments, voice, output_dir))
 
 
 # ─────────────────────────────────────────────

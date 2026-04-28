@@ -615,9 +615,6 @@ namespace VideoProcessor
         // ── FFmpeg Helpers ───────────────────────────────
         private async Task<VideoInfo> GetVideoInfoAsync(string videoPath, CancellationToken ct)
         {
-            //var args = $"-v quiet -print_format json -show_streams -show_format \"{videoPath}\"";
-            //var output = await RunProcessAsync("ffprobe", args, ct, captureOutput: true);
-            //return ParseVideoInfo(output);
 
             var psi = new ProcessStartInfo("ffprobe")
             {
@@ -765,94 +762,11 @@ namespace VideoProcessor
                     cmd.Append($"-map 0:v -map 0:a -af \"{af}\" ");
                 }
             }
-
-            cmd.Append($"-c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k -movflags +faststart \"{outputPath}\"");
+            cmd.Append($"-c:v h264_nvenc -preset p4 -cq 18 -b:v 5M -c:a aac -b:a 192k -movflags +faststart \"{outputPath}\"");
 
             Log($"FFmpeg args: {cmd}", LogLevel.Debug);
             await RunProcessAsync("ffmpeg", cmd.ToString(), ct);
         }
-
-        //    private async Task RenderFinalVideoAsync(string inputPath, string srtPath, string dubbedAudioPath, string outputPath, VideoInfo info, CancellationToken ct)
-        //    {
-        //        var speed = (double)nudSpeed.Value;
-        //        var zoom = (double)nudZoom.Value / 100.0;
-        //        var volumeDb = (double)nudVolumeDuck.Value;
-
-        //        var vfParts = new List<string>();
-
-        //        if (chkZoom.Checked)
-        //        {
-        //            // CapCut Scale 130% (zoom = 1.3) nghĩa là khung hình thực tế chỉ lấy 1/1.3 (~76.92%) diện tích ở giữa.
-
-        //            // 1. Tính toán kích thước vùng trung tâm cần giữ lại
-        //            int cropW = (int)Math.Round(info.Width / zoom);
-        //            int cropH = (int)Math.Round(info.Height / zoom);
-
-        //            // H.264 yêu cầu kích thước phải là số chẵn
-        //            if (cropW % 2 != 0) cropW--;
-        //            if (cropH % 2 != 0) cropH--;
-
-        //            // 2. Tính toán tọa độ x, y để cắt đúng từ tâm
-        //            int cropX = (info.Width - cropW) / 2;
-        //            int cropY = (info.Height - cropH) / 2;
-
-        //            // Đảm bảo tọa độ cắt cũng là số chẵn
-        //            if (cropX % 2 != 0) cropX--;
-        //            if (cropY % 2 != 0) cropY--;
-
-        //            // 3. Lệnh FFmpeg: Crop trước, Scale sau
-        //            vfParts.Add($"crop={cropW}:{cropH}:{cropX}:{cropY},scale={info.Width}:{info.Height}");
-        //        }
-
-        //        // Speed
-        //        if (chkSpeed.Checked && speed != 1.0)
-        //            vfParts.Add($"setpts={(1.0 / speed).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}*PTS");
-
-        //        // Subtitle - dung ASS thay vi SRT de tranh loi force_style
-        //        if (chkSub.Checked && File.Exists(srtPath))
-        //        {
-        //            // Convert SRT -> ASS voi style tuy chinh
-        //            var assPath = Path.Combine(Path.GetTempPath(), "vp_sub.ass");
-        //            ConvertSrtToAss(srtPath, assPath);
-
-        //            //var escapedAss = assPath.Replace("\\", "/");
-        //            var escapedAss = assPath
-        //.Replace("\\", "/")
-        //.Replace(":", "\\:");
-        //            vfParts.Add($"ass=filename='{escapedAss}'");
-        //        }
-
-        //        string vf = vfParts.Count > 0 ? string.Join(",", vfParts) : "null";
-
-        //        // Audio
-        //        var afParts = new List<string>();
-        //        afParts.Add($"volume={volumeDb.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}dB");
-        //        if (chkSpeed.Checked && speed != 1.0)
-        //            afParts.Add($"atempo={speed.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}");
-        //        string originalAf = string.Join(",", afParts);
-
-        //        bool hasDub = chkDub.Checked && File.Exists(dubbedAudioPath);
-
-        //        var cmd = new System.Text.StringBuilder();
-        //        cmd.Append($"-y -i \"{inputPath}\" ");
-        //        if (hasDub) cmd.Append($"-i \"{dubbedAudioPath}\" ");
-        //        cmd.Append($"-vf \"{vf}\" ");
-
-        //        if (hasDub)
-        //        {
-        //            cmd.Append($"-filter_complex \"[0:a]{originalAf}[orig];[orig][1:a]amix=inputs=2:normalize=0[aout]\" ");
-        //            cmd.Append($"-map 0:v -map \"[aout]\" ");
-        //        }
-        //        else
-        //        {
-        //            cmd.Append($"-af \"{originalAf}\" ");
-        //        }
-
-        //        cmd.Append($"-c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k -movflags +faststart \"{outputPath}\"");
-
-        //        Log($"FFmpeg args: {cmd}", LogLevel.Debug);
-        //        await RunProcessAsync("ffmpeg", cmd.ToString(), ct);
-        //    }
 
         private void ConvertSrtToAss(string srtPath, string assPath)
         {
