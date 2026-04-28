@@ -1,0 +1,10 @@
+﻿.vs/
+bin/
+obj/
+*.exe
+*.dll
+*.user
+*.suo
+node_modules/
+__pycache__/
+*.pyc
