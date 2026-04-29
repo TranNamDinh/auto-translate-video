@@ -15,7 +15,6 @@ namespace VideoProcessor
         private string _inputVideo = "";
         private string _workDir = "";
         private CancellationTokenSource? _cts;
-        private ProcessingConfig _config = new ProcessingConfig();
 
         // ── Controls ─────────────────────────────────────
         private TextBox txtInput = new();
@@ -24,7 +23,6 @@ namespace VideoProcessor
         private TextBox txtOutput = new();
         private ComboBox cboSrcLang = new();
         private ComboBox cboTgtLang = new();
-        private NumericUpDown nudVolume = new();
         private NumericUpDown nudZoom = new();
         private NumericUpDown nudSpeed = new();
         private NumericUpDown nudVolumeDuck = new();
@@ -39,9 +37,7 @@ namespace VideoProcessor
         private Button btnStart = new();
         private Button btnCancel = new();
         private Button btnSetup = new();
-        private Panel pnlTop = new();
-        private Panel pnlOptions = new();
-        private Panel pnlLog = new();
+
 
         public MainForm()
         {
@@ -189,33 +185,6 @@ namespace VideoProcessor
             grpLog.Controls.Add(logBottom);
             mainLayout.Controls.Add(grpLog, 0, 3);
         }
-
-        //private Panel MakeLangRow()
-        //{
-        //    var panel = new Panel { Padding = new Padding(0, 4, 0, 0) };
-        //    string[] langs = { "auto", "vi", "en", "zh", "ja", "ko", "fr", "de", "es", "ru", "th", "id", "pt" };
-
-        //    var lblSrc = new Label { Text = "Ngôn ngữ gốc:", ForeColor = Color.FromArgb(170, 170, 200), AutoSize = true, Location = new Point(0, 8) };
-        //    cboSrcLang.Items.AddRange(langs);
-        //    cboSrcLang.SelectedItem = "auto";
-        //    cboSrcLang.BackColor = Color.FromArgb(35, 35, 48);
-        //    cboSrcLang.ForeColor = Color.White;
-        //    cboSrcLang.FlatStyle = FlatStyle.Flat;
-        //    cboSrcLang.Width = 80; cboSrcLang.Location = new Point(120, 5);
-        //    cboSrcLang.DropDownStyle = ComboBoxStyle.DropDownList;
-
-        //    var lblTgt = new Label { Text = "Dịch sang:", ForeColor = Color.FromArgb(170, 170, 200), AutoSize = true, Location = new Point(210, 8) };
-        //    cboTgtLang.Items.AddRange(langs);
-        //    cboTgtLang.SelectedItem = "vi";
-        //    cboTgtLang.BackColor = Color.FromArgb(35, 35, 48);
-        //    cboTgtLang.ForeColor = Color.White;
-        //    cboTgtLang.FlatStyle = FlatStyle.Flat;
-        //    cboTgtLang.Width = 80; cboTgtLang.Location = new Point(295, 5);
-        //    cboTgtLang.DropDownStyle = ComboBoxStyle.DropDownList;
-
-        //    panel.Controls.AddRange(new Control[] { lblSrc, cboSrcLang, lblTgt, cboTgtLang });
-        //    return panel;
-        //}
 
         private Panel MakeLangRow()
         {
@@ -461,30 +430,6 @@ namespace VideoProcessor
         // ── Main Processing ──────────────────────────────
         private async Task ProcessVideoAsync(CancellationToken ct)
         {
-            //var safeInput = Path.Combine(_workDir, "input.mp4");
-            //Log("Copy video to safe path...", LogLevel.Info);
-            //File.Copy(_inputVideo, safeInput, true);
-            //_inputVideo = safeInput;
-
-            //var outDir = txtOutput.Text.Trim();
-            //if (string.IsNullOrEmpty(outDir))
-            //    outDir = Path.GetDirectoryName(_inputVideo)!;
-
-            //Directory.CreateDirectory(outDir);
-
-            //_workDir = Path.Combine(Path.GetTempPath(), "VideoProc_" + Guid.NewGuid().ToString("N")[..8]);
-            //Directory.CreateDirectory(_workDir);
-            //Log($"Work dir: {_workDir}", LogLevel.Debug);
-
-            //var baseName = Path.GetFileNameWithoutExtension(_inputVideo);
-            ////var outputPath = Path.Combine(outDir, baseName + "_processed.mp4");
-
-            //// Thay vi dung ten file goc lam output
-            //var outputPath = Path.Combine(outDir, baseName + "_processed.mp4");
-
-            //// Dung safe path render xong roi copy
-            //var safeOutput = Path.Combine(_workDir, "output.mp4");
-
             // 1. Tao work dir TRUOC
             _workDir = Path.Combine(Path.GetTempPath(), "VideoProc_" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(_workDir);
@@ -504,12 +449,6 @@ namespace VideoProcessor
             var baseName = Path.GetFileNameWithoutExtension(_inputVideo);
             var outputPath = Path.Combine(outDir, baseName + "_processed.mp4");
             var safeOutput = Path.Combine(_workDir, "output.mp4");
-
-            // ... dung safeOutput trong RenderFinalVideoAsync ...
-
-            // Sau khi render xong
-            //File.Copy(safeOutput, outputPath, true);
-            Log($"Saved to: {outputPath}", LogLevel.Success);
 
             // Step 1: Get video info
             Log("📊 Đọc thông tin video...", LogLevel.Info);
@@ -536,7 +475,7 @@ namespace VideoProcessor
                 var srcLang = cboSrcLang.SelectedItem?.ToString() == "auto" ? "" : cboSrcLang.SelectedItem?.ToString() ?? "";
                 var tgtLang = cboTgtLang.SelectedItem?.ToString() ?? "vi";
 
-                var transcribeArgs = $"--input \"{_inputVideo}\" --audio-extract \"{audioPath}\" --transcribe " +
+                var transcribeArgs = $"--input \"{_inputVideo}\" --audio \"{audioPath}\" --transcribe " +
                     $"--segments-json \"{segmentsJson}\" " +
                     (srcLang.Length > 0 ? $"--src-lang {srcLang} " : "");
 
@@ -549,8 +488,10 @@ namespace VideoProcessor
                     Log($"🌐 Dịch sang {tgtLang}...", LogLevel.Info);
                     SetStatus("Đang dịch...");
                     ct.ThrowIfCancellationRequested();
+
                     var translateArgs = $"--input \"{_inputVideo}\" --translate --tgt-lang {tgtLang} " +
                         $"--segments-json \"{segmentsJson}\"";
+
                     await RunPythonScriptAsync("video_processor.py", translateArgs, ct);
                     Log("✓ Dịch hoàn tất", LogLevel.Success);
                 }
@@ -609,7 +550,8 @@ namespace VideoProcessor
             }
 
             // Cleanup
-            try { Directory.Delete(_workDir, true); } catch { }
+            try { Directory.Delete(_workDir, true); } 
+            catch { Directory.Delete(_workDir, true); }
         }
 
         // ── FFmpeg Helpers ───────────────────────────────
