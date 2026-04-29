@@ -288,7 +288,6 @@ def _load_piper(tgt_lang: str):
 
     return _piper_voice
 
-
 def generate_tts_audio(segments: list[dict], tgt_lang: str, output_dir: str) -> list[dict]:
     os.makedirs(output_dir, exist_ok=True)
     voice = _load_piper(tgt_lang)
@@ -298,6 +297,7 @@ def generate_tts_audio(segments: list[dict], tgt_lang: str, output_dir: str) -> 
     progress("Tạo lồng tiếng…", 5)
 
     for i, seg in enumerate(segments):
+        # Loại bỏ các ký tự không hợp lệ để tránh lỗi Piper
         text = re.sub(r"[^\w\s]", "", seg["text"].strip())
         if not text:
             result.append({**seg, "audio_path": None})
@@ -306,7 +306,13 @@ def generate_tts_audio(segments: list[dict], tgt_lang: str, output_dir: str) -> 
         path = os.path.join(output_dir, f"seg_{i:04d}.wav")
         try:
             with wave.open(path, "wb") as wf:
+                # --- THÊM CÁC DÒNG CẤU HÌNH DƯỚI ĐÂY ---
+                wf.setnchannels(1)           # Mono
+                wf.setsampwidth(2)          # 16-bit
+                wf.setframerate(voice.config.sample_rate) # Tự động lấy sample rate từ model
+                # --------------------------------------
                 voice.synthesize(text, wf)
+                
             result.append({**seg, "audio_path": path})
         except Exception as e:
             log(f"TTS error [{text[:30]}]: {e}", "WARN")

@@ -649,7 +649,7 @@ namespace VideoProcessor
             }
             finally
             {
-                try { Directory.Delete(workDir, true); } catch { }
+                //try { Directory.Delete(workDir, true); } catch { }
             }
         }
 
