@@ -2,33 +2,36 @@
 import sys
 import os
 import json
-import asyncio
 import argparse
 import subprocess
+import time  
+import re
 
-# Fix Windows encoding
+# Cấu hình encoding cho Windows để tránh lỗi hiển thị tiếng Việt
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-
 def log(msg, level="INFO"):
     print(f"[{level}] {msg}", flush=True)
 
-
 # ─────────────────────────────────────────────
-# 1. TRANSCRIBE
+# 1. TRANSCRIBE (Whisper)
 # ─────────────────────────────────────────────
 def transcribe_audio(audio_path, language=None):
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Không tìm thấy file audio: {audio_path}")
     try:
         import whisper
     except ImportError:
         subprocess.run([sys.executable, "-m", "pip", "install", "openai-whisper", "-q"], check=True)
         import whisper
 
+    log("Đang nạp mô hình Whisper (base)...")
     model = whisper.load_model("base")
-
+    
+    log(f"Đang nhận dạng giọng nói...")
     result = model.transcribe(audio_path, language=language)
 
     segments = []
@@ -38,278 +41,183 @@ def transcribe_audio(audio_path, language=None):
             "end": seg["end"],
             "text": seg["text"].strip()
         })
-
     return segments, result.get("language", "en")
 
-
 # ─────────────────────────────────────────────
-# 2. TRANSLATE (FIXED)
+# 2. TRANSLATE VỚI GEMINI AI (Dùng 2.0 Flash - Siêu Ổn Định)
 # ─────────────────────────────────────────────
-def ensure_model(src, tgt):
-    import argostranslate.package
+def translate_segments_gemini(segments, src_lang, tgt_lang, api_key):
+    if src_lang == tgt_lang:
+        for seg in segments: seg["text_src"] = seg["text"]
+        return segments
+    if not api_key:
+        log("Thiếu API Key. Bỏ qua dịch thuật.", "WARN")
+        return segments
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        subprocess.run([sys.executable, "-m", "pip", "install", "google-genai", "-q"], check=True)
+        from google import genai
+        from google.genai import types
 
-    argostranslate.package.update_package_index()
-    available = argostranslate.package.get_available_packages()
+    log(f"Đang dịch thuật AI ({src_lang} -> {tgt_lang}) bằng Gemini 2.0 Flash...")
+    client = genai.Client(api_key=api_key)
+    
+    sys_prompt = f"""Bạn là chuyên gia dịch thuật video chuyên nghiệp từ {src_lang} sang {tgt_lang}.
+Yêu cầu: Dịch thoát ý, tự nhiên. Nếu là tiếng Trung (zh), dùng văn phong Hán Việt mượt mà.
+Đầu ra là JSON array: [{{"id": 0, "text_translated": "..."}}]. Không dùng dấu ngoặc kép bên trong câu dịch."""
 
-    pkg = next((p for p in available if p.from_code == src and p.to_code == tgt), None)
-
-    if not pkg:
-        log(f"No model for {src}->{tgt}", "WARN")
-        return
-
-    installed = argostranslate.package.get_installed_packages()
-    installed_pairs = [(p.from_code, p.to_code) for p in installed]
-
-    if (src, tgt) not in installed_pairs:
-        log(f"Installing model {src}->{tgt}")
-        argostranslate.package.install_from_path(pkg.download())
-
-def translate_segments(segments, src_lang, tgt_lang):
-    import argostranslate.translate
-
-    # normalize
-    if src_lang.lower().startswith("zh"):
-        src_lang = "zh"
-
-    log(f"Translate: {src_lang} -> {tgt_lang}")
-
-    # Chỉ tải mô hình dịch nếu ngôn ngữ đích khác ngôn ngữ nguồn
-    if src_lang != tgt_lang:
-        if src_lang != "en":
-            ensure_model(src_lang, "en")
-        if tgt_lang != "en":
-            ensure_model("en", tgt_lang)
-
+    batch_size = 20
     translated = []
-
-    for seg in segments:
-        text = seg["text"].strip()
-
-        if not text:
-            translated.append({**seg, "text": ""})
-            continue
-
-        try:
-            # Xử lý thông minh các luồng dịch
-            if src_lang == tgt_lang:
-                final_text = text
-            elif src_lang == "en":
-                # Nguồn là tiếng Anh -> Dịch thẳng sang ngôn ngữ đích
-                final_text = argostranslate.translate.translate(text, "en", tgt_lang)
-            elif tgt_lang == "en":
-                # Đích là tiếng Anh -> Dịch thẳng từ ngôn ngữ nguồn
-                final_text = argostranslate.translate.translate(text, src_lang, "en")
-            else:
-                # Nguồn và đích đều không phải tiếng Anh -> Bắt cầu qua tiếng Anh
-                en_text = argostranslate.translate.translate(text, src_lang, "en")
-                final_text = argostranslate.translate.translate(en_text, "en", tgt_lang)
-
-            log(f"{text} -> {final_text}", "DEBUG")
-
-        except Exception as e:
-            log(f"❌ ERROR: {e}", "WARN")
-            final_text = text  # Fallback lại văn bản gốc nếu lỗi để không bị crash
-
-        translated.append({
-            **seg,
-            "text_src": text,
-            "text": final_text
-        })
-
+    for i in range(0, len(segments), batch_size):
+        batch = segments[i:i+batch_size]
+        input_data = [{"id": idx, "text_original": seg["text"]} for idx, seg in enumerate(batch)]
+        prompt = f"{sys_prompt}\n\nNội dung cần dịch:\n{json.dumps(input_data, ensure_ascii=False)}"
+        
+        success = False
+        # Thử lại tối đa 5 lần nếu gặp lỗi quá tải
+        for attempt in range(5):
+            try:
+                # Chuyển hẳn sang gemini-2.0-flash (bản ổn định nhất hiện tại)
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json", 
+                        temperature=0.2
+                    ),
+                )
+                
+                res_text = response.text.strip()
+                res_text = re.sub(r'^```json\s*|\s*```$', '', res_text) 
+                parsed = json.loads(res_text)
+                
+                for j, seg in enumerate(batch):
+                    item = next((x for x in parsed if x.get("id") == j), None)
+                    s_copy = seg.copy()
+                    s_copy["text_src"] = seg["text"]
+                    s_copy["text"] = item.get("text_translated", seg["text"]) if item else seg["text"]
+                    translated.append(s_copy)
+                success = True
+                break
+            except Exception as e:
+                err = str(e)
+                # Lỗi 503 (Quá tải) hoặc 429 (Hết lượt)
+                if "503" in err or "High demand" in err:
+                    wait_time = 15 + (attempt * 5) # Tăng dần thời gian chờ: 15s, 20s, 25s...
+                    log(f"Server Gemini 2.0 đang bận, chờ {wait_time}s rồi thử lại...", "INFO")
+                    time.sleep(wait_time)
+                elif "429" in err:
+                    log("Đã hết lượt dùng API miễn phí (429). Chờ 30s...", "WARN")
+                    time.sleep(30)
+                else:
+                    log(f"Lỗi dịch cụm {i} (Lần {attempt+1}): {err[:100]}", "WARN")
+                    time.sleep(5)
+        
+        if not success:
+            log(f"Bỏ qua dịch cụm {i} do server Google quá tải lâu ngày.", "ERROR")
+            for seg in batch:
+                sc = seg.copy(); sc["text_src"] = seg["text"]; translated.append(sc)
+        
+        # Nghỉ giữa các cụm để tránh bị Google "soi" spam
+        time.sleep(5)
     return translated
 
 # ─────────────────────────────────────────────
-# 3. TTS
+# 3. TTS (Piper Offline)
 # ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# 3. TTS (ĐÃ TỐI ƯU HÓA)
-# ─────────────────────────────────────────────
-def get_voice_for_language(lang):
-    return {
-        "vi": "vi-VN-NamMinhNeural",       # Vietnamese male
-        "en": "en-US-GuyNeural",           # English male
-        "zh": "zh-CN-YunxiNeural",         # Chinese
-        "ja": "ja-JP-KeitaNeural",         # Japanese
-        "ko": "ko-KR-InJoonNeural",        # Korean
-        "fr": "fr-FR-HenriNeural",         # French
-        "de": "de-DE-ConradNeural",        # German
-        "es": "es-ES-AlvaroNeural",        # Spanish
-        "ru": "ru-RU-DmitryNeural",        # Russian
-        "th": "th-TH-NiwatNeural",         # Thai
-        "id": "id-ID-ArdiNeural",          # Indonesian
-        "pt": "pt-BR-AntonioNeural",       # Portuguese
-    }.get(lang, "en-US-GuyNeural")
-
-
-async def process_all_tts(segments, voice, output_dir):
-    import edge_tts
-    import re
-    import asyncio
-    import os
+def generate_tts_audio_offline(segments, tgt_lang, output_dir):
+    import urllib.request
+    import wave
+    try:
+        from piper import PiperVoice
+    except ImportError:
+        subprocess.run([sys.executable, "-m", "pip", "install", "piper-tts", "-q"], check=True)
+        from piper import PiperVoice
     
+    os.makedirs(output_dir, exist_ok=True)
+    m_name = "vi_VN-vais1000-medium.onnx" if tgt_lang == "vi" else "en_US-lessac-medium.onnx"
+    m_path = os.path.join(os.getcwd(), m_name)
+    
+    if not os.path.exists(m_path):
+        log(f"Đang tải Model Piper...")
+        # Link tải dự phòng rút gọn
+        url_base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/{tgt_lang}/{tgt_lang.upper()}/{m_name.split('-')[0].replace('_','/')}/medium/"
+        urllib.request.urlretrieve(url_base + m_name, m_path)
+        urllib.request.urlretrieve(url_base + m_name + ".json", m_path + ".json")
+
+    voice = PiperVoice.load(m_path)
     result = []
-
     for i, seg in enumerate(segments):
-        text = seg["text"].strip()
-
-        # Lọc bỏ ký tự chết
-        text_clean = re.sub(r'[^\w\s]', '', text)
-        if not text_clean.strip():
-            result.append({**seg, "audio_path": None})
-            continue
-
-        path = os.path.join(output_dir, f"seg_{i:04d}.mp3")
-        
-        # === CƠ CHẾ TỰ ĐỘNG THỬ LẠI (AUTO-RETRY) ===
-        max_retries = 3
-        success = False
-        
-        for attempt in range(max_retries):
-            try:
-                # Lần 1 & 2 chạy rate +25%. Nếu vẫn lỗi, lần 3 trả về tốc độ gốc để tránh bị server bắt lỗi parameter.
-                current_rate = "+25%" if attempt < 2 else "+0%"
-                
-                communicate = edge_tts.Communicate(text, voice, rate=current_rate)
-                await communicate.save(path)
-                
-                # Kiểm tra chắc chắn file đã tải về và có dung lượng > 0
-                if os.path.exists(path) and os.path.getsize(path) > 0:
-                    result.append({**seg, "audio_path": path})
-                    success = True
-                    break  # Thành công thì thoát vòng lặp thử lại
-                else:
-                    raise Exception("File trống (No audio received)")
-                    
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    # Nếu lỗi, chờ 2 giây để server nhả block rồi mới thử lại
-                    await asyncio.sleep(2)
-                else:
-                    log(f"❌ Bó tay sau 3 lần thử ở đoạn [{text}]: {e}", "WARN")
-        
-        if not success:
-            result.append({**seg, "audio_path": None})
-            
-        # Nghỉ ngơi 0.3 giây giữa các câu bình thường để tránh spam server
-        await asyncio.sleep(0.3)
-
+        t_clean = re.sub(r'[^\w\s\.,!\?]', '', seg["text"])
+        if not t_clean.strip(): result.append({**seg, "audio_path": None}); continue
+        path = os.path.join(output_dir, f"seg_{i:04d}.wav")
+        with wave.open(path, 'wb') as f:
+            f.setnchannels(1); f.setsampwidth(2); f.setframerate(voice.config.sample_rate)
+            voice.synthesize(t_clean, f)
+        result.append({**seg, "audio_path": path})
     return result
 
-
-def generate_tts_audio(segments, tgt_lang, output_dir):
-    import asyncio
-    os.makedirs(output_dir, exist_ok=True)
-    voice = get_voice_for_language(tgt_lang)
-    
-    # Chạy 1 luồng duy nhất cho toàn bộ danh sách, tránh nghẽn mạng
-    return asyncio.run(process_all_tts(segments, voice, output_dir))
-
-
 # ─────────────────────────────────────────────
-# 4. SRT
-# ─────────────────────────────────────────────
-def format_srt_time(s):
-    h = int(s // 3600)
-    m = int((s % 3600) // 60)
-    sec = int(s % 60)
-    ms = int((s - int(s)) * 1000)
-    return f"{h:02}:{m:02}:{sec:02},{ms:03}"
-
-
-def write_srt(segments, path):
-    with open(path, "w", encoding="utf-8") as f:
-        for i, seg in enumerate(segments, 1):
-            text = seg.get("text") or seg.get("text_src")
-
-            f.write(f"{i}\n")
-            f.write(f"{format_srt_time(seg['start'])} --> {format_srt_time(seg['end'])}\n")
-            f.write(f"{text}\n\n")
-
-
-# ─────────────────────────────────────────────
-# MAIN
+# 4. MAIN
 # ─────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--audio")
-    parser.add_argument("--transcribe", action="store_true")
-    parser.add_argument("--translate", action="store_true")
-    parser.add_argument("--src-lang", default=None)
-    parser.add_argument("--tgt-lang", default="vi")
-    parser.add_argument("--segments-json")
-    parser.add_argument("--srt-output")
-    
-    # THÊM CÁC DÒNG NÀY ĐỂ NHẬN LỆNH TỪ C#
-    parser.add_argument("--tts", action="store_true")
-    parser.add_argument("--tts-dir")
-    parser.add_argument("--dubbed-audio")
-    parser.add_argument("--video-duration", type=float, default=0.0)
-
+    parser.add_argument("--input", required=True); parser.add_argument("--audio")
+    parser.add_argument("--transcribe", action="store_true"); parser.add_argument("--translate", action="store_true")
+    parser.add_argument("--api-key", default=""); parser.add_argument("--tgt-lang", default="vi")
+    parser.add_argument("--segments-json"); parser.add_argument("--srt-output")
+    parser.add_argument("--tts", action="store_true"); parser.add_argument("--tts-dir")
+    parser.add_argument("--dubbed-audio"); parser.add_argument("--video-duration", type=float, default=0.0)
     args = parser.parse_args()
 
-    segments = []
-    lang = args.src_lang or "en"
-
+    segments, lang = [], "en"
     if args.segments_json and os.path.exists(args.segments_json):
         with open(args.segments_json, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            segments = data.get("segments", [])
-            lang = data.get("language", lang)
-
-    # if args.audio_extract:
-        # subprocess.run([
-            # "ffmpeg", "-y", "-i", args.input,
-            # "-vn", "-acodec", "pcm_s16le",
-            # "-ar", "16000", "-ac", "1",
-            # args.audio_extract
-        # ], check=True)
+            data = json.load(f); segments = data.get("segments", []); lang = data.get("language", "en")
 
     if args.transcribe:
-        segments, lang = transcribe_audio(args.audio, args.src_lang)
-
+        segments, lang = transcribe_audio(args.audio)
+    
     if args.translate:
-        segments = translate_segments(segments, lang, args.tgt_lang)
+        segments = translate_segments_gemini(segments, lang, args.tgt_lang, args.api_key)
 
     if args.segments_json:
         with open(args.segments_json, "w", encoding="utf-8") as f:
             json.dump({"segments": segments, "language": lang}, f, ensure_ascii=False, indent=2)
 
-    if args.srt_output:
-        write_srt(segments, args.srt_output)
-        
-        # ... (code ghi srt_output ở trên) ...
-
-    # XỬ LÝ LỒNG TIẾNG (TTS)
     if args.tts and args.tts_dir and args.dubbed_audio:
-        log("Bắt đầu tạo TTS và ghép nối audio...")
         try:
-            from pydub import AudioSegment
+            from pydub import AudioSegment, effects
         except ImportError:
             subprocess.run([sys.executable, "-m", "pip", "install", "pydub", "-q"], check=True)
-            from pydub import AudioSegment
+            from pydub import AudioSegment, effects
 
-        # 1. Tạo các file audio nhỏ cho từng segment
-        segments = generate_tts_audio(segments, args.tgt_lang, args.tts_dir)
+        log("Đang tạo giọng đọc Piper...")
+        segments = generate_tts_audio_offline(segments, args.tgt_lang, args.tts_dir)
+        base_audio = AudioSegment.silent(duration=max(int(args.video_duration * 1000), 1000))
 
-        # 2. Tạo một track im lặng (silent) bằng tổng thời lượng video
-        base_audio = AudioSegment.silent(duration=int(args.video_duration * 1000))
-
-        # 3. Đặt các câu thoại TTS vào đúng vị trí thời gian
         for seg in segments:
-            audio_path = seg.get("audio_path")
-            if audio_path and os.path.exists(audio_path):
-                try:
-                    seg_audio = AudioSegment.from_file(audio_path)
-                    start_ms = int(seg["start"] * 1000)
-                    base_audio = base_audio.overlay(seg_audio, position=start_ms)
-                except Exception as e:
-                    log(f"Lỗi ghép đoạn TTS: {e}", "WARN")
+            if seg.get("audio_path"):
+                s_audio = AudioSegment.from_wav(seg["audio_path"])
+                start_ms, end_ms = int(seg["start"] * 1000), int(seg["end"] * 1000)
+                limit = end_ms - start_ms
+                if len(s_audio) > limit and limit > 0:
+                    s_audio = effects.speedup(s_audio, playback_speed=min(len(s_audio)/limit, 2.0))
+                base_audio = base_audio.overlay(s_audio, position=start_ms)
 
-        # 4. Xuất file audio tổng (.aac hoặc .wav tùy vào cấu hình C#)
-        export_format = "adts" if args.dubbed_audio.endswith(".aac") else "wav"
-        base_audio.export(args.dubbed_audio, format=export_format)
-        log(f"Đã xuất audio lồng tiếng: {args.dubbed_audio}")
+        temp_wav = args.dubbed_audio.replace(".aac", ".wav")
+        base_audio.export(temp_wav, format="wav")
+        # Gọi FFmpeg trộn file cuối
+        subprocess.run(["ffmpeg", "-y", "-i", temp_wav, "-c:a", "aac", "-b:a", "192k", args.dubbed_audio], check=True)
+        if os.path.exists(temp_wav): os.remove(temp_wav)
+        log("Lồng tiếng hoàn tất!", "SUCCESS")
 
 if __name__ == "__main__":
-    main()
+    try: main()
+    except Exception as e:
+        import traceback
+        log(f"Lỗi hệ thống: {e}", "ERROR")
+        traceback.print_exc()
+        sys.exit(1)

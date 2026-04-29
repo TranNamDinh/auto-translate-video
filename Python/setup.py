@@ -7,10 +7,13 @@ import os
 PACKAGES = [
     "openai-whisper",
     "edge-tts",
-    "argostranslate",
+    "google-genai",
     "torch",
     "tqdm",
     "numpy",
+    "pydub",
+    "piper-tts" # Thay thế TTS bằng piper-tts
+    #"TTS" # Bổ sung thêm thư viện AI TTS Offline yêu cầu py 3.6
 ]
 
 def install(pkg):

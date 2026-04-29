@@ -21,6 +21,7 @@ namespace VideoProcessor
         private Button btnBrowse = new();
         private Button btnOutput = new();
         private TextBox txtOutput = new();
+        private TextBox txtApiKey = new(); // Bổ sung API Key
         private ComboBox cboSrcLang = new();
         private ComboBox cboTgtLang = new();
         private NumericUpDown nudVolume = new();
@@ -51,7 +52,7 @@ namespace VideoProcessor
 
         private void BuildUI()
         {
-            this.Text = "🎬 Video Processor Pro";
+            this.Text = "🎬 Video Processor Pro (Gemini AI)";
             this.Size = new Size(900, 780);
             this.MinimumSize = new Size(800, 680);
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -67,25 +68,28 @@ namespace VideoProcessor
                 Padding = new Padding(14),
                 BackColor = Color.Transparent
             };
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 130)); // Input
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 170)); // Input (Tăng để chứa 3 dòng)
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 260)); // Options
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));  // Buttons
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // Log
             this.Controls.Add(mainLayout);
 
             // ── Input Panel ──────────────────────────────
-            var grpInput = MakeGroup("📁 Input / Output");
+            var grpInput = MakeGroup("📁 Input / Output & API");
             grpInput.Dock = DockStyle.Fill;
 
-            var tbl = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 3, Padding = new Padding(8) };
+            var tbl = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 3, Padding = new Padding(8) };
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
-            tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-            tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 34));
 
             StyleTextBox(txtInput); txtInput.PlaceholderText = "Chọn file video MP4..."; txtInput.ReadOnly = true;
             StyleTextBox(txtOutput); txtOutput.PlaceholderText = "Thư mục xuất (mặc định cùng thư mục input)..."; txtOutput.ReadOnly = true;
+            StyleTextBox(txtApiKey); txtApiKey.PlaceholderText = "Nhập Gemini API Key (Bắt buộc để dịch tự nhiên)...";
+
 
             StyleButton(btnBrowse, "📂 Video", Color.FromArgb(60, 100, 180));
             StyleButton(btnOutput, "📁 Output", Color.FromArgb(60, 120, 80));
@@ -99,6 +103,7 @@ namespace VideoProcessor
             tbl.Controls.Add(txtOutput, 0, 1);
             tbl.Controls.Add(btnOutput, 1, 1);
             tbl.Controls.Add(new Label { Text = "" }, 2, 1);
+            tbl.Controls.Add(txtApiKey, 0, 2); tbl.SetColumnSpan(txtApiKey, 3); // Trải dài dòng cuối
 
             grpInput.Controls.Add(tbl);
             mainLayout.Controls.Add(grpInput, 0, 0);
@@ -191,13 +196,12 @@ namespace VideoProcessor
 
         private Panel MakeLangRow()
         {
-            // Dùng FlowLayoutPanel để tự động căn dòng, chống lỗi đè giao diện khi Scale màn hình
             var panel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Padding = new Padding(0, 4, 0, 0),
-                AutoSize = true // Tự động co giãn theo nội dung
+                AutoSize = true
             };
 
             string[] langs = { "auto", "vi", "en", "zh", "ja", "ko", "fr", "de", "es", "ru", "th", "id", "pt" };
@@ -207,7 +211,7 @@ namespace VideoProcessor
                 Text = "Ngôn ngữ gốc:",
                 ForeColor = Color.FromArgb(170, 170, 200),
                 AutoSize = true,
-                Margin = new Padding(0, 8, 5, 0) // Căn lề trái/phải để không dính sát vào ô chọn
+                Margin = new Padding(0, 8, 5, 0)
             };
 
             cboSrcLang.Items.AddRange(langs);
@@ -217,7 +221,7 @@ namespace VideoProcessor
             cboSrcLang.FlatStyle = FlatStyle.Flat;
             cboSrcLang.Width = 75;
             cboSrcLang.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboSrcLang.Margin = new Padding(0, 5, 15, 0); // Đẩy nút Dịch sang cách xa 15px
+            cboSrcLang.Margin = new Padding(0, 5, 15, 0);
 
             var lblTgt = new Label
             {
@@ -245,7 +249,7 @@ namespace VideoProcessor
             var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = false, Padding = new Padding(4) };
 
             chkSub = MakeCheck("📝 Thêm phụ đề (nền đen, chữ trắng)", true);
-            chkTranslate = MakeCheck("🌐 Dịch phụ đề sang ngôn ngữ đích", true);
+            chkTranslate = MakeCheck("🌐 Dịch phụ đề sang ngôn ngữ đích (Gemini AI)", true);
             chkDub = MakeCheck("🔊 Lồng tiếng (Edge-TTS, miễn phí)", true);
             chkZoom = MakeCheck("🔍 Zoom 130%", true);
             chkSpeed = MakeCheck("⚡ Tua 1.3x", true);
@@ -344,6 +348,13 @@ namespace VideoProcessor
         private void LoadDefaults()
         {
             // Defaults already set in controls
+            lblStatus.Text = "Sẵn sàng";
+
+            // Mình chỉnh lại logic một chút: Nếu chưa có Key thì tự điền Key của bạn vào
+            if (string.IsNullOrEmpty(txtApiKey.Text))
+            {
+                txtApiKey.Text = "AIzaSyApZXlLtZxCpw9j0TPMRGK3xflS6tiVR_k";
+            }
         }
 
         // ── Events ───────────────────────────────────────
@@ -394,6 +405,12 @@ namespace VideoProcessor
                 return;
             }
 
+            if (chkTranslate.Checked && string.IsNullOrWhiteSpace(txtApiKey.Text))
+            {
+                MessageBox.Show("Vui lòng nhập Gemini API Key để thực hiện dịch bằng AI!", "Thiếu API Key", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             _cts = new CancellationTokenSource();
             btnStart.Enabled = false;
             btnCancel.Enabled = true;
@@ -433,7 +450,6 @@ namespace VideoProcessor
         // ── Main Processing ──────────────────────────────
         private async Task ProcessVideoAsync(CancellationToken ct)
         {
-
             // 1. Tao work dir TRUOC
             _workDir = Path.Combine(Path.GetTempPath(), "VideoProc_" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(_workDir);
@@ -462,6 +478,7 @@ namespace VideoProcessor
             string srtPath = "";
             string dubbedAudioPath = "";
             string segmentsJson = Path.Combine(_workDir, "segments.json");
+            string apiKey = txtApiKey.Text.Trim();
 
             if (chkSub.Checked || chkDub.Checked)
             {
@@ -489,11 +506,11 @@ namespace VideoProcessor
                 // Step 4: Translate
                 if (chkTranslate.Checked)
                 {
-                    Log($"🌐 Dịch sang {tgtLang}...", LogLevel.Info);
-                    SetStatus("Đang dịch...");
+                    Log($"🌐 Dịch sang {tgtLang} (Sử dụng Gemini AI Batch)...", LogLevel.Info);
+                    SetStatus("Đang dịch AI...");
                     ct.ThrowIfCancellationRequested();
                     var translateArgs = $"--input \"{_inputVideo}\" --translate --tgt-lang {tgtLang} " +
-                        $"--segments-json \"{segmentsJson}\"";
+                        $"--segments-json \"{segmentsJson}\" --api-key \"{apiKey}\"";
                     await RunPythonScriptAsync("video_processor.py", translateArgs, ct);
                     Log("✓ Dịch hoàn tất", LogLevel.Success);
                 }
@@ -552,14 +569,13 @@ namespace VideoProcessor
             }
 
             // Cleanup
-            try { Directory.Delete(_workDir, true); } 
+            try { Directory.Delete(_workDir, true); }
             catch { Directory.Delete(_workDir, true); }
         }
 
         // ── FFmpeg Helpers ───────────────────────────────
         private async Task<VideoInfo> GetVideoInfoAsync(string videoPath, CancellationToken ct)
         {
-
             var psi = new ProcessStartInfo("ffprobe")
             {
                 Arguments = $"-v quiet -print_format json -show_streams -show_format \"{videoPath}\"",
@@ -567,7 +583,6 @@ namespace VideoProcessor
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                // THÊM 2 DÒNG NÀY VÀO:
                 StandardOutputEncoding = System.Text.Encoding.UTF8,
                 StandardErrorEncoding = System.Text.Encoding.UTF8
             };
@@ -640,7 +655,7 @@ namespace VideoProcessor
 
             var vfParts = new List<string>();
 
-            // 1. CROP & ZOOM (Làm đầu tiên)
+            // 1. CROP & ZOOM
             if (chkZoom.Checked)
             {
                 int cropW = (int)Math.Round(info.Width / zoom);
@@ -654,7 +669,7 @@ namespace VideoProcessor
                 vfParts.Add($"crop={cropW}:{cropH}:{cropX}:{cropY},scale={info.Width}:{info.Height}");
             }
 
-            // 2. ÉP SUB VÀO VIDEO (Làm khi video chưa bị tua nhanh)
+            // 2. ÉP SUB VÀO VIDEO
             if (chkSub.Checked && File.Exists(srtPath))
             {
                 var assPath = Path.Combine(Path.GetTempPath(), "vp_sub.ass");
@@ -663,7 +678,7 @@ namespace VideoProcessor
                 vfParts.Add($"ass=filename='{escapedAss}'");
             }
 
-            // 3. TUA NHANH VIDEO (Làm cuối cùng cho phần hình)
+            // 3. TUA NHANH VIDEO
             if (chkSpeed.Checked && speed != 1.0)
             {
                 vfParts.Add($"setpts={(1.0 / speed).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}*PTS");
@@ -687,7 +702,6 @@ namespace VideoProcessor
 
             if (hasDub)
             {
-                // Trộn TTS vào âm thanh gốc TRƯỚC, rồi mới tua nhanh toàn bộ (atempo)
                 string atempoPart = !string.IsNullOrEmpty(speedFilter) ? $",{speedFilter}" : "";
                 cmd.Append($"-filter_complex \"{videoFilter}[0:a]{volFilter}[orig];[orig][1:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0{atempoPart}[aout]\" ");
                 cmd.Append($"-map {mapV} -map \"[aout]\" ");
@@ -713,91 +727,8 @@ namespace VideoProcessor
             await RunProcessAsync("ffmpeg", cmd.ToString(), ct);
         }
 
-        //    private async Task RenderFinalVideoAsync(string inputPath, string srtPath, string dubbedAudioPath, string outputPath, VideoInfo info, CancellationToken ct)
-        //    {
-        //        var speed = (double)nudSpeed.Value;
-        //        var zoom = (double)nudZoom.Value / 100.0;
-        //        var volumeDb = (double)nudVolumeDuck.Value;
-
-        //        var vfParts = new List<string>();
-
-        //        if (chkZoom.Checked)
-        //        {
-        //            // CapCut Scale 130% (zoom = 1.3) nghĩa là khung hình thực tế chỉ lấy 1/1.3 (~76.92%) diện tích ở giữa.
-
-        //            // 1. Tính toán kích thước vùng trung tâm cần giữ lại
-        //            int cropW = (int)Math.Round(info.Width / zoom);
-        //            int cropH = (int)Math.Round(info.Height / zoom);
-
-        //            // H.264 yêu cầu kích thước phải là số chẵn
-        //            if (cropW % 2 != 0) cropW--;
-        //            if (cropH % 2 != 0) cropH--;
-
-        //            // 2. Tính toán tọa độ x, y để cắt đúng từ tâm
-        //            int cropX = (info.Width - cropW) / 2;
-        //            int cropY = (info.Height - cropH) / 2;
-
-        //            // Đảm bảo tọa độ cắt cũng là số chẵn
-        //            if (cropX % 2 != 0) cropX--;
-        //            if (cropY % 2 != 0) cropY--;
-
-        //            // 3. Lệnh FFmpeg: Crop trước, Scale sau
-        //            vfParts.Add($"crop={cropW}:{cropH}:{cropX}:{cropY},scale={info.Width}:{info.Height}");
-        //        }
-
-        //        // Speed
-        //        if (chkSpeed.Checked && speed != 1.0)
-        //            vfParts.Add($"setpts={(1.0 / speed).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}*PTS");
-
-        //        // Subtitle - dung ASS thay vi SRT de tranh loi force_style
-        //        if (chkSub.Checked && File.Exists(srtPath))
-        //        {
-        //            // Convert SRT -> ASS voi style tuy chinh
-        //            var assPath = Path.Combine(Path.GetTempPath(), "vp_sub.ass");
-        //            ConvertSrtToAss(srtPath, assPath);
-
-        //            //var escapedAss = assPath.Replace("\\", "/");
-        //            var escapedAss = assPath
-        //.Replace("\\", "/")
-        //.Replace(":", "\\:");
-        //            vfParts.Add($"ass=filename='{escapedAss}'");
-        //        }
-
-        //        string vf = vfParts.Count > 0 ? string.Join(",", vfParts) : "null";
-
-        //        // Audio
-        //        var afParts = new List<string>();
-        //        afParts.Add($"volume={volumeDb.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}dB");
-        //        if (chkSpeed.Checked && speed != 1.0)
-        //            afParts.Add($"atempo={speed.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}");
-        //        string originalAf = string.Join(",", afParts);
-
-        //        bool hasDub = chkDub.Checked && File.Exists(dubbedAudioPath);
-
-        //        var cmd = new System.Text.StringBuilder();
-        //        cmd.Append($"-y -i \"{inputPath}\" ");
-        //        if (hasDub) cmd.Append($"-i \"{dubbedAudioPath}\" ");
-        //        cmd.Append($"-vf \"{vf}\" ");
-
-        //        if (hasDub)
-        //        {
-        //            cmd.Append($"-filter_complex \"[0:a]{originalAf}[orig];[orig][1:a]amix=inputs=2:normalize=0[aout]\" ");
-        //            cmd.Append($"-map 0:v -map \"[aout]\" ");
-        //        }
-        //        else
-        //        {
-        //            cmd.Append($"-af \"{originalAf}\" ");
-        //        }
-
-        //        cmd.Append($"-c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k -movflags +faststart \"{outputPath}\"");
-
-        //        Log($"FFmpeg args: {cmd}", LogLevel.Debug);
-        //        await RunProcessAsync("ffmpeg", cmd.ToString(), ct);
-        //    }
-
         private void ConvertSrtToAss(string srtPath, string assPath)
         {
-            // ASS header voi style nen den chu trang can giua duoi
             var assHeader = @"[Script Info]
 ScriptType: v4.00+
 PlayResX: 1920
@@ -819,13 +750,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             int i = 0;
             while (i < lines.Length)
             {
-                // Skip index number
                 if (int.TryParse(lines[i].Trim(), out _)) i++;
                 else { i++; continue; }
 
                 if (i >= lines.Length) break;
 
-                // Timestamp
                 var timeLine = lines[i].Trim(); i++;
                 if (!timeLine.Contains("-->")) continue;
 
@@ -835,7 +764,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 string start = SrtTimeToAss(times[0].Trim());
                 string end = SrtTimeToAss(times[1].Trim());
 
-                // Text lines
                 var textLines = new List<string>();
                 while (i < lines.Length && lines[i].Trim().Length > 0)
                 {
@@ -854,7 +782,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         private string SrtTimeToAss(string srtTime)
         {
-            // SRT: 00:00:01,234 -> ASS: 0:00:01.23
             var t = srtTime.Replace(",", ".");
             var parts = t.Split(':');
             if (parts.Length < 3) return "0:00:00.00";
@@ -869,7 +796,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         // ── Process Runners ──────────────────────────────
         private string GetPythonScript(string scriptName)
         {
-            // Look for Python scripts relative to exe
             var exeDir = AppDomain.CurrentDomain.BaseDirectory;
             var candidates = new[]
             {
