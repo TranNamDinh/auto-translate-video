@@ -14,7 +14,6 @@ namespace VideoProcessor
     public partial class MainForm : Form
     {
         private CancellationTokenSource? _cts;
-        private ProcessingConfig _config = new ProcessingConfig();
 
         // ── Controls ─────────────────────────────────────
         private RadioButton rdoSingle = new();
@@ -25,7 +24,6 @@ namespace VideoProcessor
         private TextBox txtOutput = new();
         private ComboBox cboSrcLang = new();
         private ComboBox cboTgtLang = new();
-        private NumericUpDown nudVolume = new();
         private NumericUpDown nudZoom = new();
         private NumericUpDown nudSpeed = new();
         private NumericUpDown nudVolumeDuck = new();
@@ -40,9 +38,6 @@ namespace VideoProcessor
         private Button btnStart = new();
         private Button btnCancel = new();
         private Button btnSetup = new();
-        private Panel pnlTop = new();
-        private Panel pnlOptions = new();
-        private Panel pnlLog = new();
         private FlowLayoutPanel pnlMode = new();
 
         public MainForm()
@@ -584,7 +579,7 @@ namespace VideoProcessor
                     var srcLang = cboSrcLang.SelectedItem?.ToString() == "auto" ? "" : cboSrcLang.SelectedItem?.ToString() ?? "";
                     var tgtLang = cboTgtLang.SelectedItem?.ToString() ?? "vi";
 
-                    var transcribeArgs = $"--input \"{safeInput}\" --audio-extract \"{audioPath}\" --transcribe " +
+                    var transcribeArgs = $"--input \"{safeInput}\" --audio \"{audioPath}\" --transcribe " +
                         $"--segments-json \"{segmentsJson}\" " +
                         (srcLang.Length > 0 ? $"--src-lang {srcLang} " : "");
 
