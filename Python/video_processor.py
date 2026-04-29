@@ -232,7 +232,7 @@ def write_srt(segments, path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
-    parser.add_argument("--audio-extract")
+    parser.add_argument("--audio")
     parser.add_argument("--transcribe", action="store_true")
     parser.add_argument("--translate", action="store_true")
     parser.add_argument("--src-lang", default=None)
@@ -257,16 +257,16 @@ def main():
             segments = data.get("segments", [])
             lang = data.get("language", lang)
 
-    if args.audio_extract:
-        subprocess.run([
-            "ffmpeg", "-y", "-i", args.input,
-            "-vn", "-acodec", "pcm_s16le",
-            "-ar", "16000", "-ac", "1",
-            args.audio_extract
-        ], check=True)
+    # if args.audio_extract:
+        # subprocess.run([
+            # "ffmpeg", "-y", "-i", args.input,
+            # "-vn", "-acodec", "pcm_s16le",
+            # "-ar", "16000", "-ac", "1",
+            # args.audio_extract
+        # ], check=True)
 
     if args.transcribe:
-        segments, lang = transcribe_audio(args.audio_extract, args.src_lang)
+        segments, lang = transcribe_audio(args.audio, args.src_lang)
 
     if args.translate:
         segments = translate_segments(segments, lang, args.tgt_lang)
@@ -310,10 +310,6 @@ def main():
         export_format = "adts" if args.dubbed_audio.endswith(".aac") else "wav"
         base_audio.export(args.dubbed_audio, format=export_format)
         log(f"Đã xuất audio lồng tiếng: {args.dubbed_audio}")
-
-if __name__ == "__main__":
-    main()
-
 
 if __name__ == "__main__":
     main()
